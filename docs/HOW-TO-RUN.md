@@ -52,6 +52,9 @@ Check from a terminal: `curl http://localhost:4000/health` (repeat it: the `serv
    the chat open). Hover them for who has read it. Type in bob's tab: alice sees `typing…`.
 5. Close alice's tab: bob's header changes from `online` to `last seen today at …`.
 6. Stop one server (Ctrl+C): its tabs reconnect through nginx to the other one.
+7. Go offline in bob's tab (DevTools → Network → Offline), send from both sides, go back online: bob
+   catches up, and his clock-marked message goes out once. Stop both servers and reload a tab: the
+   history still shows, from IndexedDB (DevTools → Application → IndexedDB → `wa-<username>`).
 
 The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
 HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.

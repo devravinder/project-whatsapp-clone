@@ -7,22 +7,52 @@ import {
   TYPING_THROTTLE_MS,
   WS_PATH,
 } from "@wa/protocol";
-import { type Api, api } from "./api.js";
-import { ChatStore } from "./store.js";
+import { type Api, ApiError, api } from "./api.js";
+import { LocalDb } from "./local-db.js";
+import { ChatStore, type LocalMessage, messageKey } from "./store.js";
 
 const HISTORY_PAGE = 50;
-const RECONNECT_MS = 2000;
+const SYNC_PAGE = 100;
+const SYNC_PARALLEL = 4;
 // Batches receipts for messages arriving in a burst.
 const RECEIPT_DELAY_MS = 200;
+const BACKOFF_BASE_MS = 500;
+const BACKOFF_MAX_MS = 30_000;
+// A retryable failure while online (e.g. 409 still in flight) is tried again after this.
+const RETRY_MS = 3000;
+
+// Full jitter: a random wait up to an exponentially growing cap, so clients do not reconnect in step.
+export const backoffDelay = (attempt: number, random = Math.random) =>
+  Math.round(random() * Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** attempt));
+
+class SendError extends Error {
+  constructor(
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+  }
+}
+
+function asSendError(error: unknown): SendError {
+  if (error instanceof SendError) return error;
+  if (error instanceof ApiError) {
+    return new SendError(error.message, error.status === 409 || error.status >= 500);
+  }
+  // fetch() throws TypeError when the network is down.
+  return new SendError((error as Error).message, true);
+}
 
 type Waiter = { resolve: (ack: SendAck) => void; reject: (error: Error) => void };
 
-// Talks to the server and keeps the store up to date.
+// Talks to the server and keeps the store (and IndexedDB behind it) up to date.
 export class ChatClient {
   readonly store = new ChatStore();
   readonly api: Api;
+  private readonly db: LocalDb;
   private socket: WebSocket | null = null;
   private stopped = false;
+  private attempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly waiting = new Map<string, Waiter>();
   private watched = "";
@@ -31,24 +61,61 @@ export class ChatClient {
   private readonly receiptQueue = new Set<string>();
   private receiptTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly lastTyping = new Map<string, number>();
+  // One send at a time, in the order typed; inFlight stops the same message being queued twice.
+  private outbox: Promise<void> = Promise.resolve();
+  private readonly inFlight = new Set<string>();
+  private syncing: Promise<void> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  // StrictMode mounts twice; only the latest start() may connect.
+  private generation = 0;
 
   constructor(readonly username: string) {
     this.api = api(username);
+    this.db = new LocalDb(username);
+    this.store.persist = {
+      messages: (messages) => void this.db.saveMessages(messages),
+      conversations: (list, replaceAll) =>
+        void this.db.transaction("rw", this.db.conversations, async () => {
+          if (replaceAll) await this.db.conversations.clear();
+          await this.db.conversations.bulkPut(list);
+        }),
+    };
   }
 
-  start(): void {
+  async start(): Promise<void> {
+    const generation = ++this.generation;
     this.stopped = false;
     document.addEventListener("visibilitychange", this.onVisibility);
-    void this.refreshConversations();
+    window.addEventListener("online", this.reconnectNow);
+    window.addEventListener("offline", this.dropSocket);
+    const [messages, conversations] = await Promise.all([
+      this.db.loadMessages(),
+      this.db.conversations.toArray(),
+    ]);
+    if (generation !== this.generation || this.stopped) return;
+    this.store.hydrate(messages, conversations);
     this.connect();
   }
 
   stop(): void {
     this.stopped = true;
     document.removeEventListener("visibilitychange", this.onVisibility);
+    window.removeEventListener("online", this.reconnectNow);
+    window.removeEventListener("offline", this.dropSocket);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.socket?.close(1000, "logout");
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    const socket = this.socket;
+    this.socket = null;
+    socket?.close(1000, "logout");
   }
+
+  // The browser says the network is back: skip the rest of the wait.
+  reconnectNow = () => {
+    if (this.stopped || this.socket || !this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.connect();
+  };
 
   private connect(): void {
     const scheme = location.protocol === "https:" ? "wss" : "ws";
@@ -57,16 +124,31 @@ export class ChatClient {
     this.store.setConnection("connecting");
     socket.onopen = () => this.emit({ type: "hello", username: this.username });
     socket.onmessage = (event) => this.onEvent(JSON.parse(event.data) as ServerEvent);
-    socket.onclose = () => {
-      if (this.socket !== socket) return;
-      this.socket = null;
-      this.store.setConnection("offline");
-      this.watched = "";
-      this.reported.clear();
-      for (const [, waiter] of this.waiting) waiter.reject(new Error("connection lost"));
-      this.waiting.clear();
-      if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_MS);
-    };
+    socket.onclose = () => this.closed(socket);
+  }
+
+  // A dead network does not close a socket for minutes, and pings are invisible to page code.
+  private dropSocket = () => {
+    const socket = this.socket;
+    if (!socket) return;
+    socket.close();
+    this.closed(socket);
+  };
+
+  private closed(socket: WebSocket): void {
+    if (this.socket !== socket) return;
+    this.socket = null;
+    this.watched = "";
+    this.reported.clear();
+    for (const [, waiter] of this.waiting) waiter.reject(new SendError("connection lost", true));
+    this.waiting.clear();
+    if (this.stopped) return;
+    const delay = backoffDelay(this.attempt++);
+    this.store.setConnection("offline", null, Date.now() + delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   private emit(event: ClientEvent): boolean {
@@ -78,8 +160,9 @@ export class ChatClient {
   private onEvent(event: ServerEvent): void {
     switch (event.type) {
       case "ready":
+        this.attempt = 0;
         this.store.setConnection("online", event.serverId);
-        void this.catchUp();
+        void this.sync().catch((error: Error) => console.warn("sync failed:", error.message));
         break;
       case "message": {
         this.store.addMessages([event.message]);
@@ -90,13 +173,12 @@ export class ChatClient {
         break;
       }
       case "ack": {
-        this.store.acknowledge(this.username, event);
         this.waiting.get(event.clientMsgId)?.resolve(event);
         this.waiting.delete(event.clientMsgId);
         break;
       }
       case "nack": {
-        this.waiting.get(event.clientMsgId)?.reject(new Error(event.reason));
+        this.waiting.get(event.clientMsgId)?.reject(new SendError(event.reason, event.retryable));
         this.waiting.delete(event.clientMsgId);
         break;
       }
@@ -115,18 +197,54 @@ export class ChatClient {
     }
   }
 
-  // Messages sent while this tab was disconnected are not pushed again; fetch them.
-  private async catchUp(): Promise<void> {
+  // Pushes are best effort: after every (re)connect, fetch whatever was missed, then flush the outbox.
+  sync(): Promise<void> {
+    this.syncing ??= this.syncAll().finally(() => {
+      this.syncing = null;
+    });
+    return this.syncing;
+  }
+
+  private async syncAll(): Promise<void> {
     await this.refreshConversations();
-    const active = this.store.activeId;
-    if (!active) return;
-    const after = this.store.newestId(active);
-    const page = await this.api.history(
-      active,
-      after ? { after, limit: 100 } : { limit: HISTORY_PAGE },
-    );
-    this.store.addMessages(page.messages);
-    this.queueReceipts([active]);
+    const todo = this.store.sortedConversations().filter((c) => c.lastMessage);
+    for (let i = 0; i < todo.length; i += SYNC_PARALLEL) {
+      await Promise.all(
+        todo
+          .slice(i, i + SYNC_PARALLEL)
+          .map((c) => this.syncConversation(c.conversationId, c.lastMessage!.messageId)),
+      );
+    }
+    this.queueReceipts(todo.map((c) => c.conversationId));
+    if (this.store.activeId) {
+      this.store.setDetail(await this.api.detail(this.store.activeId));
+    }
+    this.flushOutbox();
+  }
+
+  // The cursor only moves over a gap-free run fetched from the server, never on a live push.
+  private async syncConversation(conversationId: string, lastId: string): Promise<void> {
+    const cursor = (await this.db.cursors.get(conversationId))?.syncedUpTo;
+    if (cursor && isAtOrAfter(cursor, lastId)) return;
+    let syncedUpTo = cursor;
+    if (!syncedUpTo) {
+      // First time on this device: the newest page now, older pages on demand.
+      const page = await this.api.history(conversationId, { limit: HISTORY_PAGE });
+      this.store.addMessages(page.messages);
+      this.store.hasOlder.set(conversationId, page.hasMore);
+      syncedUpTo = page.messages.at(-1)?.messageId;
+    } else {
+      for (let more = true; more;) {
+        const page = await this.api.history(conversationId, {
+          after: syncedUpTo,
+          limit: SYNC_PAGE,
+        });
+        this.store.addMessages(page.messages);
+        syncedUpTo = page.messages.at(-1)?.messageId ?? syncedUpTo;
+        more = page.hasMore;
+      }
+    }
+    if (syncedUpTo) await this.db.cursors.put({ conversationId, syncedUpTo });
   }
 
   async refreshConversations(): Promise<void> {
@@ -151,59 +269,100 @@ export class ChatClient {
 
   async open(conversationId: string): Promise<void> {
     this.store.setActive(conversationId);
-    const [detail, page] = await Promise.all([
-      this.api.detail(conversationId),
-      this.api.history(conversationId, { limit: HISTORY_PAGE }),
-    ]);
-    this.store.setDetail(detail);
-    this.store.addMessages(page.messages);
-    this.queueReceipts([conversationId]);
-    if (!this.store.hasOlder.has(conversationId))
+    if (this.store.timeline(conversationId).length === 0) {
+      const page = await this.api
+        .history(conversationId, { limit: HISTORY_PAGE })
+        .catch(() => null);
+      if (!page) return;
+      this.store.addMessages(page.messages);
       this.store.hasOlder.set(conversationId, page.hasMore);
+    } else if (!this.store.hasOlder.has(conversationId)) {
+      // Loaded from IndexedDB: older pages may exist on the server.
+      this.store.hasOlder.set(conversationId, true);
+    }
+    this.queueReceipts([conversationId]);
+    // Offline: the local history is shown; the detail (members, ticks) arrives with the next sync.
+    const detail = await this.api.detail(conversationId).catch(() => null);
+    if (detail) this.store.setDetail(detail);
   }
 
   async loadOlder(conversationId: string): Promise<void> {
     const before = this.store.oldestId(conversationId);
-    const page = await this.api.history(conversationId, { before, limit: HISTORY_PAGE });
+    const page = await this.api
+      .history(conversationId, { before, limit: HISTORY_PAGE })
+      .catch(() => null);
+    if (!page) return;
     this.store.hasOlder.set(conversationId, page.hasMore);
     this.store.addMessages(page.messages);
   }
 
-  async send(conversationId: string, body: string): Promise<void> {
-    const clientMsgId = crypto.randomUUID();
+  // Shown at once with a clock; IndexedDB keeps it across reloads until the server acknowledges.
+  send(conversationId: string, body: string): void {
     // The recipient drops the indicator when the message lands; typing again must show at once.
     this.lastTyping.delete(conversationId);
-    this.store.addPending({
+    const message: LocalMessage = {
       conversationId,
-      clientMsgId,
+      clientMsgId: crypto.randomUUID(),
       sender: this.username,
       kind: "text",
       body,
       sentAt: new Date().toISOString(),
       messageId: null,
       status: "pending",
-    });
+    };
+    this.store.addPending(message);
+    this.enqueue(message);
+  }
+
+  retry(message: LocalMessage): void {
+    this.store.setStatus(this.username, message.conversationId, message.clientMsgId, "pending");
+    this.enqueue(message);
+  }
+
+  private flushOutbox(): void {
+    for (const message of this.store.pending()) this.enqueue(message);
+  }
+
+  private enqueue(message: LocalMessage): void {
+    const key = messageKey(message);
+    if (this.inFlight.has(key)) return;
+    this.inFlight.add(key);
+    this.outbox = this.outbox
+      .then(() => this.deliver(message))
+      .finally(() => this.inFlight.delete(key));
+  }
+
+  // Same clientMsgId on every attempt: the server turns repeats into the first ack (ADR-006).
+  private async deliver(message: LocalMessage): Promise<void> {
+    const { conversationId, clientMsgId, body } = message;
     try {
       const ack = await this.sendOnce(conversationId, clientMsgId, body);
       this.store.acknowledge(this.username, ack);
     } catch (error) {
-      this.store.fail(this.username, conversationId, clientMsgId);
-      throw error;
+      const failure = asSendError(error);
+      // Retryable ones stay pending; the next sync (after reconnect) sends them again.
+      if (!failure.retryable) {
+        this.store.setStatus(this.username, conversationId, clientMsgId, "failed");
+      } else if (this.store.connection === "online") {
+        this.retryTimer ??= setTimeout(() => {
+          this.retryTimer = null;
+          this.flushOutbox();
+        }, RETRY_MS);
+      }
     }
   }
 
   // WebSocket when connected, REST otherwise; the server treats both the same.
   private sendOnce(conversationId: string, clientMsgId: string, body: string): Promise<SendAck> {
-    const viaSocket = new Promise<SendAck>((resolve, reject) => {
+    if (this.store.connection !== "online") {
+      return this.api.send(conversationId, clientMsgId, body);
+    }
+    return new Promise<SendAck>((resolve, reject) => {
       this.waiting.set(clientMsgId, { resolve, reject });
       if (!this.emit({ type: "send", conversationId, clientMsgId, body })) {
         this.waiting.delete(clientMsgId);
-        reject(new Error("offline"));
+        reject(new SendError("offline", true));
       }
-    });
-    return viaSocket.catch((error: Error) => {
-      if (error.message !== "offline") throw error;
-      return this.api.send(conversationId, clientMsgId, body);
     });
   }
 

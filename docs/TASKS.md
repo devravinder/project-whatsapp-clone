@@ -60,9 +60,14 @@
 
 ## 5. Offline sync
 
-- [ ] Reconnect with exponential backoff and jitter
-- [ ] Sync "since cursor" per conversation
-- [ ] Local history in IndexedDB (Dexie)
+- [x] Reconnect with exponential backoff and full jitter (0.5 s doubling to 30 s), `online`/`offline` events
+- [x] Sync after every connect: conversation list, then `after=<cursor>` pages per conversation
+- [x] Local history and outbox in IndexedDB (Dexie, one database per user); the app opens offline
+- [x] Outbox: pending messages resent in order with the same `clientMsgId` after reconnect
+- [x] Verified in the browser: offline bob catches up on 3 messages, his offline message reaches alice
+      exactly once, history loads from IndexedDB with both servers down, a pending message survives a
+      reload, 5 reconnect attempts in 15 s, the outbox is delivered once after the restart. Fixed on the
+      way: Chrome's offline mode never closed the open socket, and an unhandled 502 from `open()`.
 
 ## 6. Group chat
 

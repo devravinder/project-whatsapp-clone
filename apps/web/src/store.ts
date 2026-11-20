@@ -19,6 +19,12 @@ export type LocalMessage = Omit<ChatMessage, "messageId"> & {
 
 export type Connection = "connecting" | "online" | "offline";
 
+// Where the store writes through to (IndexedDB in the app).
+export interface Persistence {
+  messages(messages: LocalMessage[]): void;
+  conversations(list: ConversationSummary[], replaceAll: boolean): void;
+}
+
 // Sender + clientMsgId is unique and known before the server assigns messageId.
 export const messageKey = (m: { sender: string; clientMsgId: string }) =>
   `${m.sender}:${m.clientMsgId}`;
@@ -41,6 +47,9 @@ export class ChatStore {
   activeId: string | null = null;
   connection: Connection = "connecting";
   serverId: string | null = null;
+  // When the next reconnect attempt happens, while offline.
+  retryAt: number | null = null;
+  persist: Persistence | null = null;
 
   private version = 0;
   private readonly listeners = new Set<() => void>();
@@ -119,29 +128,58 @@ export class ChatStore {
     );
   }
 
-  setConnection(connection: Connection, serverId: string | null = null): void {
-    this.connection = connection;
-    this.serverId = serverId;
+  // Local history first, so the app works before (or without) the server.
+  hydrate(messages: LocalMessage[], conversations: ConversationSummary[]): void {
+    for (const c of conversations) this.conversations.set(c.conversationId, c);
+    for (const m of messages) this.bucket(m.conversationId).set(messageKey(m), m);
     this.changed();
   }
 
-  fail(sender: string, conversationId: string, clientMsgId: string): void {
+  // The outbox: everything typed but not yet acknowledged, oldest first.
+  pending(): LocalMessage[] {
+    return [...this.messages.values()]
+      .flatMap((bucket) => [...bucket.values()])
+      .filter((m) => m.status === "pending")
+      .sort((a, b) => a.sentAt.localeCompare(b.sentAt));
+  }
+
+  setStatus(
+    sender: string,
+    conversationId: string,
+    clientMsgId: string,
+    status: LocalMessage["status"],
+  ): void {
     const bucket = this.bucket(conversationId);
     const key = messageKey({ sender, clientMsgId });
     const message = bucket.get(key);
-    if (message?.status !== "pending") return;
-    bucket.set(key, { ...message, status: "failed" });
+    if (!message || message.status === "sent" || message.status === status) return;
+    const updated = { ...message, status };
+    bucket.set(key, updated);
+    this.persist?.messages([updated]);
+    this.changed();
+  }
+
+  setConnection(
+    connection: Connection,
+    serverId: string | null = null,
+    retryAt: number | null = null,
+  ): void {
+    this.connection = connection;
+    this.serverId = serverId;
+    this.retryAt = retryAt;
     this.changed();
   }
 
   setConversations(list: ConversationSummary[]): void {
     this.conversations.clear();
     for (const c of list) this.conversations.set(c.conversationId, c);
+    this.persist?.conversations(list, true);
     this.changed();
   }
 
   upsertConversation(summary: ConversationSummary): void {
     this.conversations.set(summary.conversationId, summary);
+    this.persist?.conversations([summary], false);
     this.changed();
   }
 
@@ -177,12 +215,14 @@ export class ChatStore {
       }
       this.bumpLastMessage(m);
     }
+    if (added.length > 0) this.persist?.messages(added);
     if (messages.length > 0) this.changed();
     return added;
   }
 
   addPending(message: LocalMessage): void {
     this.bucket(message.conversationId).set(messageKey(message), message);
+    this.persist?.messages([message]);
     this.changed();
   }
 
@@ -198,6 +238,7 @@ export class ChatStore {
       status: "sent",
     };
     bucket.set(key, sent);
+    this.persist?.messages([sent]);
     this.bumpLastMessage(sent as ChatMessage);
     this.changed();
   }
@@ -207,10 +248,12 @@ export class ChatStore {
     if (!summary) return;
     const last = summary.lastMessage;
     if (last && compareTimeuuid(last.messageId, m.messageId) >= 0) return;
-    this.conversations.set(m.conversationId, {
+    const updated = {
       ...summary,
       lastMessage: { messageId: m.messageId, sender: m.sender, preview: m.body.slice(0, 80) },
-    });
+    };
+    this.conversations.set(m.conversationId, updated);
+    this.persist?.conversations([updated], false);
   }
 
   timeline(conversationId: string): LocalMessage[] {

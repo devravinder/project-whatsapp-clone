@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ChatClient } from "../chat-client.js";
-import { type Connection, useStore } from "../store.js";
+import { useStore } from "../store.js";
 
 export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: () => void }) {
   const store = useStore(client.store);
@@ -24,7 +24,7 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
       <header className="flex items-center justify-between bg-[#f0f2f5] px-4 py-3">
         <span>
           <span className="block font-semibold">{client.username}</span>
-          <ConnectionBadge connection={store.connection} serverId={store.serverId} />
+          <ConnectionBadge client={client} />
         </span>
         <button className="text-sm text-gray-600 hover:underline" onClick={onLogout}>
           Switch user
@@ -87,23 +87,31 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
   );
 }
 
-function ConnectionBadge({
-  connection,
-  serverId,
-}: {
-  connection: Connection;
-  serverId: string | null;
-}) {
-  const label =
-    connection === "online"
-      ? `online via ${serverId}`
-      : connection === "connecting"
-        ? "connecting…"
-        : "offline";
-  const color = connection === "online" ? "text-green-700" : "text-amber-700";
+function ConnectionBadge({ client }: { client: ChatClient }) {
+  const { connection, serverId, retryAt } = client.store;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (connection !== "offline") return;
+    const timer = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(timer);
+  }, [connection]);
+
+  if (connection === "online") {
+    return (
+      <span className="block text-xs text-green-700" role="status">
+        online via {serverId}
+      </span>
+    );
+  }
+  const seconds = retryAt ? Math.max(0, Math.ceil((retryAt - Date.now()) / 1000)) : 0;
   return (
-    <span className={`block text-xs ${color}`} role="status">
-      {label}
+    <span className="block text-xs text-amber-700" role="status">
+      {connection === "connecting" ? "connecting…" : `offline, retrying in ${seconds} s`}
+      {connection === "offline" && (
+        <button className="ml-2 underline" onClick={client.reconnectNow}>
+          Retry now
+        </button>
+      )}
     </span>
   );
 }

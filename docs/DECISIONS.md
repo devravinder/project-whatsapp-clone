@@ -273,3 +273,58 @@ person arrives.
 
 Found in the UI test: right after sending, the next keystrokes were inside the 2 s throttle window, so
 the other side saw nothing. Sending a message now resets the throttle on both client and server.
+
+## ADR-013 - Offline-first client: IndexedDB, sync cursor, outbox
+
+Date: 2026-11-06 - Status: Accepted
+
+```mermaid
+sequenceDiagram
+  participant UI as Browser tab
+  participant DB as IndexedDB
+  participant S as chat-server
+  UI->>DB: load messages + conversations (works with no server)
+  UI->>S: WebSocket hello
+  S-->>UI: ready
+  UI->>S: GET /conversations
+  loop each conversation whose last message is past the cursor
+    UI->>S: GET messages?after=cursor
+    UI->>DB: save, move cursor
+  end
+  UI->>S: resend outbox (same clientMsgIds)
+```
+
+- **IndexedDB is the client's copy** (Dexie, database `wa-<username>`): messages keyed by
+  `sender:clientMsgId`, conversation summaries, and one cursor per conversation. The store writes
+  through on every change, so a reload or a server outage loses nothing that was on screen.
+- **The cursor marks a gap-free run.** It moves only when sync has fetched every message up to it.
+  Live pushes are saved but never move it: pub/sub may have dropped one before them. The next sync asks
+  for everything after the cursor and deduplicates by key.
+- **First sync on a device** fetches only the newest page; older pages load on demand.
+- **Outbox = messages with status `pending`.** Sends go through one queue in the order typed; after a
+  reconnect the queue is refilled from the store. Every attempt uses the same `clientMsgId`, so the
+  server returns the first ack instead of storing a duplicate (ADR-006). Only a non-retryable failure
+  (403, 400) marks a message failed, with a Retry button.
+- **Sync after every `ready`,** because pushes are best effort (ADR-010).
+
+Trade-off: the persister can lag the sender's ack by a few milliseconds, so a sync right after a
+reconnect can miss a message that is in Kafka but not yet in Cassandra. The cursor has not moved past
+it, so the next sync fetches it.
+
+Rejected: a server-side "sync since sequence number" per user (a global per-user sequence needs a
+counter written on every message for every member).
+
+## ADR-014 - Reconnect: full jitter, and do not wait for the socket to notice
+
+Date: 2026-11-06 - Status: Accepted
+
+- **Full jitter:** wait `random(0, min(30 s, 0.5 s × 2^attempt))`, reset on `ready`. When a server
+  restarts, all its clients drop at the same moment; without jitter they come back in waves at the
+  same instants. Measured: 5 attempts in 15 s with both servers down.
+- **`online` event** skips the wait; a "Retry now" button does the same.
+- **`offline` event closes the socket at once.** Found in testing: with the network gone, Chrome kept
+  the WebSocket `OPEN`; page code cannot see protocol pings, so the tab would have believed it was
+  connected until TCP timed out. The server side still drops the socket after one missed ping (15-30 s).
+
+Rejected: an application-level ping from the client - it would also work, but the browser event and the
+server ping cover the cases here with less traffic.

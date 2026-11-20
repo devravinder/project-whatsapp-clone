@@ -16,7 +16,6 @@ export function ChatPane({
   const detail = store.details.get(conversationId);
   const summary = store.conversations.get(conversationId);
   const timeline = store.timeline(conversationId);
-  const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const newest = timeline.at(-1);
   const title = detail?.title ?? summary?.title ?? conversationId;
@@ -63,6 +62,7 @@ export function ChatPane({
             me={client.username}
             detail={detail}
             showSender={isGroup}
+            onRetry={() => client.retry(m)}
           />
         ))}
         <div ref={bottom} />
@@ -70,16 +70,8 @@ export function ChatPane({
 
       <Composer
         onTyping={() => client.typing(conversationId)}
-        onSend={async (body) => {
-          setError(null);
-          try {
-            await client.send(conversationId, body);
-          } catch (e) {
-            setError((e as Error).message);
-          }
-        }}
+        onSend={(body) => client.send(conversationId, body)}
       />
-      {error && <p className="bg-red-50 px-4 py-1 text-sm text-red-700">{error}</p>}
     </section>
   );
 }
@@ -89,11 +81,13 @@ function Bubble({
   me,
   detail,
   showSender,
+  onRetry,
 }: {
   message: LocalMessage;
   me: string;
   detail: ConversationDetail | undefined;
   showSender: boolean;
+  onRetry: () => void;
 }) {
   if (message.kind === "system") {
     return (
@@ -115,6 +109,11 @@ function Bubble({
         <p className="mt-0.5 text-right text-[11px] text-gray-500">
           {timeOf(message.sentAt)}
           {mine && <Ticks message={message} detail={detail} me={me} />}
+          {mine && message.status === "failed" && (
+            <button className="ml-2 text-red-700 underline" onClick={onRetry}>
+              Retry
+            </button>
+          )}
         </p>
       </div>
     </div>
@@ -147,13 +146,7 @@ function Ticks({
   );
 }
 
-function Composer({
-  onSend,
-  onTyping,
-}: {
-  onSend: (body: string) => Promise<void>;
-  onTyping: () => void;
-}) {
+function Composer({ onSend, onTyping }: { onSend: (body: string) => void; onTyping: () => void }) {
   const [text, setText] = useState("");
   return (
     <form
@@ -163,7 +156,7 @@ function Composer({
         const body = text.trim();
         if (!body) return;
         setText("");
-        void onSend(body);
+        onSend(body);
       }}
     >
       <label className="sr-only" htmlFor="composer">

@@ -9,7 +9,7 @@ export function ChatApp({ username, onLogout }: { username: string; onLogout: ()
   const store = useStore(client.store);
 
   useEffect(() => {
-    client.start();
+    void client.start();
     return () => client.stop();
   }, [client]);
 
