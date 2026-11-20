@@ -9,6 +9,7 @@ coverage/
 .env.*
 !.env.sample
 !.env.development
+!.env.server-2
 *.local
 
 *.log

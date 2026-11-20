@@ -181,3 +181,53 @@ after a kill: both groups consume 3 s after the restarted server is healthy.
 
 Trade-off: a member that pauses more than 10 s (long GC, debugger breakpoint) is dropped and the group
 rebalances. Records are processed one at a time in milliseconds, so this does not happen in practice.
+
+## ADR-010 - Routing and presence in Redis
+
+Date: 2026-11-06 - Status: Accepted
+
+With two servers, the `delivery` consumer that reads a message (any server in the group) is usually
+not the server holding the recipient's socket.
+
+```mermaid
+sequenceDiagram
+  participant D as delivery on server-1
+  participant R as Redis
+  participant S2 as server-2
+  participant B as Bob
+  D->>R: ZRANGEBYSCORE servers:bob now +inf
+  R-->>D: server-2
+  D->>R: PUBLISH deliver:server-2 usernames + event
+  R->>S2: subscribed to its own channel
+  S2->>B: WebSocket frame
+```
+
+- **`servers:<user>` is a sorted set**, member = server id, score = expiry time. Each server refreshes
+  its users every 15 s with a 45 s expiry and removes expired members. A plain set with one key TTL
+  would keep a crashed server listed for as long as another server keeps refreshing the key.
+- **One pub/sub channel per server** (`deliver:<serverId>`), so a server only receives events for its
+  own users. The lookup for a group is one pipelined round trip.
+- **Presence is derived:** online = any unexpired server entry. Going offline writes
+  `lastseen:<user>` and publishes on `presence`; every server forwards it to sockets that sent a
+  `watch` frame for that user. Joining publishes online only if the user was offline everywhere.
+- **Registered before `ready`:** the hello handler awaits the Redis entry, so a push sent right after
+  `ready` finds the server.
+- **Fire-and-forget:** pub/sub stores nothing. A server that is restarting, or a socket that is
+  reconnecting, misses the push; the client recovers it from Cassandra on reconnect (Task 5).
+- **nginx round robin** for both HTTP and WebSocket, `proxy_next_upstream` for a dead server, and
+  `proxy_read_timeout 60s`, above the 15 s server ping.
+
+Measured: after a hard kill of server-2, the client reconnected through nginx to server-1 and received
+the next message; server-2's stale entry aged out 40 s later.
+
+Trade-off: when a server crashes, its users look online to watchers until their entries expire
+(up to 45 s), and no `offline` event is sent for users who never reconnect.
+
+Rejected:
+
+- Sticky sessions (`ip_hash`) instead of routing: on one machine every tab has the same IP, so all of
+  them would land on one server, and routing would still be needed after a failover.
+- Broadcasting every message to every server: simple, but each server then reads every message, which
+  does not scale with the number of servers.
+- Kafka per-server topics: durable, but a topic per server is heavy, and a push is worthless after a
+  few seconds anyway.

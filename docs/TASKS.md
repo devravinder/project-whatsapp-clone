@@ -39,9 +39,13 @@
 
 ## 3. Two servers
 
-- [ ] nginx in front of server-1 and server-2 (HTTP and WebSocket)
-- [ ] Redis routing `user → server`, pub/sub channel per server
-- [ ] Presence: online with heartbeat TTL, last seen
+- [x] nginx (`infra/nginx/nginx.conf`, port 4000) round-robins HTTP and WebSocket over server-1 and server-2
+- [x] Redis routing: `servers:<user>` sorted set (score = expiry), `deliver:<serverId>` channel per server
+- [x] Presence: online while any server lists the user; `lastseen:<user>`; `watch` frame + `presence` pushes
+- [x] Web: "online" / "last seen today at …" in the chat header, green dot in the list
+- [x] Verified: 17 checks (cross-server delivery, presence with two tabs, hard kill of server-2: the
+      client reconnects through nginx to server-1, and the stale entry ages out in 40 s); UI with alice on
+      server-1 and bob on server-2
 
 ## 4. Receipts and typing
 

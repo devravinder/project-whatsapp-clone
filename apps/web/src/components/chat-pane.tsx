@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient } from "../chat-client.js";
+import { lastSeenText, timeOf } from "../format.js";
 import { type LocalMessage, messageKey, useStore } from "../store.js";
-
-const timeOf = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 export function ChatPane({
   client,
@@ -19,6 +17,7 @@ export function ChatPane({
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
   const newest = timeline.at(-1);
+  const title = detail?.title ?? summary?.title ?? conversationId;
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
@@ -27,7 +26,10 @@ export function ChatPane({
   return (
     <section className="flex flex-1 flex-col">
       <header className="bg-[#f0f2f5] px-4 py-3">
-        <h2 className="font-semibold">{detail?.title ?? summary?.title ?? conversationId}</h2>
+        <h2 className="font-semibold">{title}</h2>
+        <p className="text-xs text-gray-600" aria-live="polite">
+          {summary?.kind === "direct" ? lastSeenText(store.presence.get(title)) : ""}
+        </p>
       </header>
 
       <div className="flex-1 overflow-y-auto px-8 py-4">

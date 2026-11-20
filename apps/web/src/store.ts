@@ -3,6 +3,7 @@ import {
   compareTimeuuid,
   type ConversationDetail,
   type ConversationSummary,
+  type Presence,
   type SendAck,
 } from "@wa/protocol";
 import { useSyncExternalStore } from "react";
@@ -31,6 +32,7 @@ export class ChatStore {
   readonly details = new Map<string, ConversationDetail>();
   readonly messages = new Map<string, Map<string, LocalMessage>>();
   readonly hasOlder = new Map<string, boolean>();
+  readonly presence = new Map<string, Presence>();
   activeId: string | null = null;
   connection: Connection = "connecting";
   serverId: string | null = null;
@@ -53,6 +55,16 @@ export class ChatStore {
   setActive(id: string | null): void {
     this.activeId = id;
     this.changed();
+  }
+
+  setPresence(presence: Presence): void {
+    this.presence.set(presence.username, presence);
+    this.changed();
+  }
+
+  // The other person in each 1:1 chat: whose presence is shown.
+  directPartners(): string[] {
+    return [...this.conversations.values()].filter((c) => c.kind === "direct").map((c) => c.title);
   }
 
   setConnection(connection: Connection, serverId: string | null = null): void {

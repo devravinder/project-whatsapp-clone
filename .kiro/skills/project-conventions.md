@@ -34,5 +34,5 @@ description: How this repo is organised, what every task must update, and cross-
 
 ## Ports
 
-chat-server-1 4001, chat-server-2 4002 (Task 3), nginx 4000 (Task 3), web 5180, Cassandra 9042,
+chat-server-1 4001, chat-server-2 4002, nginx 4000, web 5180, Cassandra 9042,
 Kafka 9095, Redis 6380.

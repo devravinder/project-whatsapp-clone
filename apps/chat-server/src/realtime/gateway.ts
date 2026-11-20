@@ -20,9 +20,10 @@ import { UsersService } from "../chat/users.service.js";
 import { APP_CONFIG, type AppConfig } from "../config.js";
 import { parseJson } from "../infra/kafka.js";
 import { LocalConnections } from "./connections.js";
+import { Directory } from "./directory.js";
+import { HEARTBEAT_MS } from "./heartbeat.js";
+import { RedisRouter } from "./router.js";
 
-// Under the usual 60 s idle timeout of proxies; also how fast a dead socket is noticed.
-export const HEARTBEAT_MS = 15_000;
 const HELLO_TIMEOUT_MS = 5_000;
 const MAX_FRAME_BYTES = 64 * 1024;
 
@@ -44,10 +45,14 @@ export class ChatGateway implements OnModuleDestroy {
     @Inject(LocalConnections) private readonly connections: LocalConnections,
     @Inject(UsersService) private readonly users: UsersService,
     @Inject(MessagesService) private readonly messages: MessagesService,
+    @Inject(Directory) private readonly directory: Directory,
+    @Inject(RedisRouter) private readonly router: RedisRouter,
   ) {}
 
   // Shares the HTTP port: the upgrade request arrives on the same server.
-  attach(server: Server): void {
+  async attach(server: Server): Promise<void> {
+    await this.router.start();
+    this.directory.start();
     this.wss = new WebSocketServer({ server, path: WS_PATH, maxPayload: MAX_FRAME_BYTES });
     this.wss.on("connection", (socket) => this.onConnection(socket));
     this.heartbeat = setInterval(() => this.beat(), HEARTBEAT_MS);
@@ -90,12 +95,20 @@ export class ChatGateway implements OnModuleDestroy {
         return;
       }
       session.username = event.username;
-      this.onJoin(event.username, socket);
+      // Registered in Redis before ready, so pushes from that moment on find this server.
+      await this.onJoin(event.username, socket);
       send(socket, { type: "ready", username: event.username, serverId: this.config.SERVER_ID });
       return;
     }
     if (!session.username) {
       socket.close(CLOSE.badHello, "hello first");
+      return;
+    }
+    if (event.type === "watch") {
+      this.router.watch(socket, event.usernames);
+      for (const username of event.usernames) {
+        send(socket, { type: "presence", ...(await this.directory.presence(username)) });
+      }
       return;
     }
     if (event.type === "send") {
@@ -114,12 +127,16 @@ export class ChatGateway implements OnModuleDestroy {
     }
   }
 
-  private onJoin(username: string, socket: WebSocket): void {
-    this.connections.add(username, socket);
+  private async onJoin(username: string, socket: WebSocket): Promise<void> {
+    if (this.connections.add(username, socket)) {
+      await this.directory.join(username).catch(warn(this.logger));
+    }
   }
 
   private onLeave(username: string, socket: WebSocket): void {
-    this.connections.remove(username, socket);
+    this.router.unwatch(socket);
+    if (this.connections.remove(username, socket))
+      void this.directory.leave(username).catch(warn(this.logger));
   }
 
   // A socket that missed one ping is gone (laptop lid closed, network dropped).
@@ -145,3 +162,5 @@ export class ChatGateway implements OnModuleDestroy {
 function send(socket: WebSocket, event: ServerEvent): void {
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
 }
+
+const warn = (logger: Logger) => (error: Error) => logger.warn(error.message);

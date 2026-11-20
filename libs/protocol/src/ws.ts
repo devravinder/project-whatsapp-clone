@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { clientMsgIdSchema, conversationIdSchema, usernameSchema } from "./ids.js";
-import type { ChatMessage, SendAck } from "./model.js";
+import type { ChatMessage, Presence, SendAck } from "./model.js";
 import { messageBodySchema } from "./rest.js";
 
 export const WS_PATH = "/ws";
@@ -17,6 +17,8 @@ export const clientEventSchema = z.discriminatedUnion("type", [
     clientMsgId: clientMsgIdSchema,
     body: messageBodySchema,
   }),
+  // Replaces the set of users whose presence this socket follows.
+  z.object({ type: z.literal("watch"), usernames: z.array(usernameSchema).max(500) }),
 ]);
 export type ClientEvent = z.infer<typeof clientEventSchema>;
 
@@ -25,4 +27,5 @@ export type ServerEvent =
   | ({ type: "ack" } & SendAck)
   | { type: "nack"; clientMsgId: string; reason: string; retryable: boolean }
   | { type: "message"; message: ChatMessage }
+  | ({ type: "presence" } & Presence)
   | { type: "error"; reason: string };

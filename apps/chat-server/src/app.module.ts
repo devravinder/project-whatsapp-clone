@@ -13,7 +13,8 @@ import { KafkaService } from "./infra/kafka.js";
 import { RedisService } from "./infra/redis.js";
 import { LocalConnections } from "./realtime/connections.js";
 import { ChatGateway } from "./realtime/gateway.js";
-import { LocalRouter, ROUTER } from "./realtime/router.js";
+import { Directory } from "./realtime/directory.js";
+import { RedisRouter, ROUTER } from "./realtime/router.js";
 
 @Module({
   controllers: [HealthController, ChatController],
@@ -27,7 +28,9 @@ import { LocalRouter, ROUTER } from "./realtime/router.js";
     ConversationsService,
     MessagesService,
     LocalConnections,
-    { provide: ROUTER, useClass: LocalRouter },
+    Directory,
+    RedisRouter,
+    { provide: ROUTER, useExisting: RedisRouter },
     ChatGateway,
     Persister,
     Delivery,

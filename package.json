@@ -16,6 +16,7 @@
     "logs:pods": "docker compose -f infra/docker-compose.yaml logs -f",
     "db:schema": "docker compose -f infra/docker-compose.yaml run --rm cassandra-schema",
     "start:server": "pnpm --filter @wa/chat-server dev",
+    "start:server2": "pnpm --filter @wa/chat-server dev:2",
     "start:web": "pnpm --filter @wa/web dev",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",

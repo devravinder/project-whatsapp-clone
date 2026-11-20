@@ -58,8 +58,14 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
               }`}
               onClick={() => void client.open(c.conversationId)}
             >
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] font-semibold uppercase text-gray-600">
+              <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#dfe5e7] font-semibold uppercase text-gray-600">
                 {c.title.slice(0, 1)}
+                {c.kind === "direct" && store.presence.get(c.title)?.online && (
+                  <span
+                    className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-green-500"
+                    title="online"
+                  />
+                )}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{c.title}</span>

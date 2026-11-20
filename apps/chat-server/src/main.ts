@@ -7,6 +7,6 @@ import { ChatGateway } from "./realtime/gateway.js";
 const app = await NestFactory.create(AppModule);
 app.enableShutdownHooks();
 const config = app.get<AppConfig>(APP_CONFIG);
-app.get(ChatGateway).attach(app.getHttpServer());
+await app.get(ChatGateway).attach(app.getHttpServer());
 await app.listen(config.PORT);
 console.log(`${config.SERVER_ID} listening on http://localhost:${config.PORT} (WebSocket /ws)`);

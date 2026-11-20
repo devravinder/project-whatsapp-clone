@@ -18,6 +18,7 @@ import {
   USERNAME_HEADER,
   usernameSchema,
 } from "@wa/protocol";
+import { Directory } from "../realtime/directory.js";
 import { ConversationsService } from "./conversations.service.js";
 import { MessagesService } from "./messages.service.js";
 import { parse } from "./parse.js";
@@ -29,6 +30,7 @@ export class ChatController {
     @Inject(UsersService) private readonly users: UsersService,
     @Inject(ConversationsService) private readonly conversations: ConversationsService,
     @Inject(MessagesService) private readonly messages: MessagesService,
+    @Inject(Directory) private readonly directory: Directory,
   ) {}
 
   // Registering an existing name just "logs in" as it.
@@ -43,6 +45,13 @@ export class ChatController {
     const name = parse(usernameSchema, username);
     await this.users.require(name);
     return { username: name };
+  }
+
+  @Get("users/:username/presence")
+  async presence(@Param("username") username: string) {
+    const name = parse(usernameSchema, username);
+    await this.users.require(name);
+    return this.directory.presence(name);
   }
 
   @Get("conversations")

@@ -6,10 +6,10 @@ Target design. Parts not built yet are marked with the task that adds them (see 
 
 ```mermaid
 flowchart LR
-  W1[Browser: Alice] <-->|WebSocket + REST| LB[nginx - Task 3]
+  W1[Browser: Alice] <-->|WebSocket + REST| LB[nginx :4000]
   W2[Browser: Bob] <-->|WebSocket + REST| LB
   LB <--> S1[chat-server-1]
-  LB <--> S2[chat-server-2 - Task 3]
+  LB <--> S2[chat-server-2]
   S1 -->|produce| K[[Kafka chat.messages]]
   S2 -->|produce| K
   K --> P[persister group]

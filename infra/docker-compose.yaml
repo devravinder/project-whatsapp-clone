@@ -103,6 +103,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Load balancer in front of chat-server-1 and -2 (both on the host), HTTP and WebSocket.
+  nginx:
+    image: nginx:1.26.3
+    container_name: wa-nginx
+    restart: unless-stopped
+    # Linux has no host.docker.internal unless it is mapped to the host gateway.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "4000:4000"
+
 volumes:
   cassandra-data:
   kafka-data:

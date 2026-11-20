@@ -15,6 +15,7 @@ export class ChatClient {
   private stopped = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly waiting = new Map<string, Waiter>();
+  private watched = "";
 
   constructor(readonly username: string) {
     this.api = api(username);
@@ -43,6 +44,7 @@ export class ChatClient {
       if (this.socket !== socket) return;
       this.socket = null;
       this.store.setConnection("offline");
+      this.watched = "";
       for (const [, waiter] of this.waiting) waiter.reject(new Error("connection lost"));
       this.waiting.clear();
       if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_MS);
@@ -79,6 +81,9 @@ export class ChatClient {
         this.waiting.delete(event.clientMsgId);
         break;
       }
+      case "presence":
+        this.store.setPresence(event);
+        break;
       case "error":
         console.warn("server:", event.reason);
         break;
@@ -100,11 +105,21 @@ export class ChatClient {
 
   async refreshConversations(): Promise<void> {
     this.store.setConversations(await this.api.conversations());
+    this.updateWatch();
+  }
+
+  // Follow the presence of everyone we have a 1:1 chat with; resent only when the set changes.
+  private updateWatch(): void {
+    const usernames = [...new Set(this.store.directPartners())].sort();
+    const key = usernames.join(",");
+    if (key === this.watched) return;
+    if (this.emit({ type: "watch", usernames })) this.watched = key;
   }
 
   async startDirect(other: string): Promise<string> {
     const summary = await this.api.startDirect(other.trim().toLowerCase());
     this.store.upsertConversation(summary);
+    this.updateWatch();
     return summary.conversationId;
   }
 

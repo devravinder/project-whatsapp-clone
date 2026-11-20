@@ -25,22 +25,31 @@ A path that differs in your registry goes in `infra/retag-images.local.json` (gi
 
 ```bash
 pnpm install
-pnpm start:pods      # Cassandra, Kafka, Redis; creates topics and the keyspace
-pnpm start:server    # chat-server-1 on http://localhost:4001
-pnpm start:web       # http://localhost:5180
+pnpm start:pods      # Cassandra, Kafka, Redis, nginx; creates topics and the keyspace
+pnpm start:server    # chat-server-1 on http://localhost:4001   (terminal 1)
+pnpm start:server2   # chat-server-2 on http://localhost:4002   (terminal 2, optional)
+pnpm start:web       # http://localhost:5180                    (terminal 3)
 ```
 
 Cassandra takes 20-60 s to become healthy on first start; `start:pods` returns before that, and the
 setup containers wait for it. The web page shows OK for Cassandra, Redis and Kafka once everything is up.
 
-Check from a terminal: `curl http://localhost:4001/health` (503 lists what is down).
+The web app talks to nginx on port 4000, which spreads requests and WebSockets over both servers.
+With only server-1 running, nginx skips the missing one.
+
+Check from a terminal: `curl http://localhost:4000/health` (repeat it: the `server` field alternates;
+503 lists what is down).
 
 ## Try it
 
 1. Open <http://localhost:5180> in two tabs. The username lives in the tab (`sessionStorage`), so each
    tab can be a different user: `alice` in one, `bob` in the other.
 2. In alice's tab, start a chat with `bob` and send a message.
-3. Bob's tab shows it at once over the WebSocket; the sidebar shows which server the tab is connected to.
+3. Bob's tab shows it at once over the WebSocket. The sidebar shows which server each tab is on; with
+   two servers running, the tabs usually land on different ones and messages still arrive (Redis routes
+   them, ADR-010).
+4. Close alice's tab: bob's header changes from `online` to `last seen today at …`.
+5. Stop one server (Ctrl+C): its tabs reconnect through nginx to the other one.
 
 The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
 HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.
@@ -49,7 +58,9 @@ HTTP client). Every call except `POST /users` needs the `x-username` header; the
 
 | What          | Port |
 | ------------- | ---- |
+| nginx         | 4000 |
 | chat-server-1 | 4001 |
+| chat-server-2 | 4002 |
 | web (Vite)    | 5180 |
 | Cassandra     | 9042 |
 | Kafka         | 9095 |
@@ -59,16 +70,17 @@ Kafka and Redis use non-default host ports so this can run next to other project
 
 ## Scripts
 
-| Script              | What it does                                             |
-| ------------------- | -------------------------------------------------------- |
-| `pnpm start:pods`   | Start the infrastructure in the background               |
-| `pnpm stop:pods`    | Stop it, **keeping** the data                            |
-| `pnpm reset:pods`   | Stop it and **delete** all data (volumes)                |
-| `pnpm logs:pods`    | Follow the infrastructure logs                           |
-| `pnpm db:schema`    | Re-apply `infra/cassandra/schema/*.cql` (safe to repeat) |
-| `pnpm start:server` | Run chat-server with watch mode                          |
-| `pnpm start:web`    | Run the web app with Vite                                |
-| `pnpm typecheck`    | Type-check every package                                 |
+| Script               | What it does                                             |
+| -------------------- | -------------------------------------------------------- |
+| `pnpm start:pods`    | Start the infrastructure in the background               |
+| `pnpm stop:pods`     | Stop it, **keeping** the data                            |
+| `pnpm reset:pods`    | Stop it and **delete** all data (volumes)                |
+| `pnpm logs:pods`     | Follow the infrastructure logs                           |
+| `pnpm db:schema`     | Re-apply `infra/cassandra/schema/*.cql` (safe to repeat) |
+| `pnpm start:server`  | Run chat-server-1 with watch mode                        |
+| `pnpm start:server2` | Run chat-server-2 (`.env.server-2`)                      |
+| `pnpm start:web`     | Run the web app with Vite                                |
+| `pnpm typecheck`     | Type-check every package                                 |
 
 ## Poking at the data
 

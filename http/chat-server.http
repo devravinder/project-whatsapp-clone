@@ -59,3 +59,11 @@ x-username: {{me}}
 # 1. send {"type":"hello","username":"alice"}            -> {"type":"ready",...}
 # 2. send {"type":"send","conversationId":"dm:alice:bob","clientMsgId":"<uuid>","body":"hi"}
 #                                                          -> {"type":"ack",...} then {"type":"message",...}
+
+### Through nginx (both servers): the "server" field alternates
+GET http://localhost:4000/health
+
+### Presence: online, or offline with lastSeen
+GET {{server}}/users/{{other}}/presence
+
+# WebSocket: {"type":"watch","usernames":["bob"]} -> {"type":"presence","username":"bob","online":true,...}
