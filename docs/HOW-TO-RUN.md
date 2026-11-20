@@ -55,6 +55,9 @@ Check from a terminal: `curl http://localhost:4000/health` (repeat it: the `serv
 7. Go offline in bob's tab (DevTools → Network → Offline), send from both sides, go back online: bob
    catches up, and his clock-marked message goes out once. Stop both servers and reload a tab: the
    history still shows, from IndexedDB (DevTools → Application → IndexedDB → `wa-<username>`).
+8. Open a third tab as `carol`. In alice's tab: **+ New group**, name it, add `bob, carol`. Messages
+   reach both; the ticks turn blue when both have read (hover for who). **Group info** adds, removes
+   or leaves; a removed member keeps the history but can no longer send.
 
 The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
 HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.

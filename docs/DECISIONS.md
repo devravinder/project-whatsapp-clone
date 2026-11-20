@@ -328,3 +328,32 @@ Date: 2026-11-06 - Status: Accepted
 
 Rejected: an application-level ping from the client - it would also work, but the browser event and the
 server ping cover the cases here with less traffic.
+
+## ADR-015 - Groups: fan-out on read of the log, membership as system messages
+
+Date: 2026-11-06 - Status: Accepted
+
+- **One message, one record.** A group message is stored once in `messages_by_conversation` and
+  produced once to Kafka. The `delivery` consumer reads the member list and pushes once per member:
+  one pipelined Redis lookup, then one publish per server holding any of them. Measured: 50 members on
+  2 servers received a message within 16 ms of sending, 256 members within 20 ms.
+- **What is written per member** is only the conversation-list preview (`conversations_by_user`) and,
+  later, a read watermark: O(members) small cells, not O(members) message copies.
+- **Membership changes are system messages** in the same topic and partition as the chat, so every
+  client sees "alice added bob" in the right place in the history, and the push tells clients to
+  refetch members. A removed member is no longer in the fan-out list, so the record carries
+  `alsoNotify: [removed]`.
+- **The member list is read at delivery time,** so a member added a moment ago gets the next message,
+  and a removed one does not.
+- **256 members, including the creator** (WhatsApp started with 256; it is now 1,024). The cap bounds
+  fan-out work per message and the size of the members partition.
+- **Admins** add and remove; anyone can leave. When the last admin leaves, the alphabetically first
+  remaining member becomes admin, so a group is never unmanageable.
+
+Rejected:
+
+- Fan-out on write into a per-user inbox table (one row per member per message): makes "sync my inbox"
+  a single partition read, but multiplies writes by group size. Worth it for very large read-heavy
+  systems; not here, where sync is per conversation (ADR-013).
+- A separate membership-events topic: ordering between "bob was removed" and the next message would
+  then depend on two topics.

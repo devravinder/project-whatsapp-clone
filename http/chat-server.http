@@ -71,3 +71,23 @@ GET {{server}}/users/{{other}}/presence
 # WebSocket: {"type":"receipt","conversationId":"dm:alice:bob","status":"read","upTo":"<messageId>"}
 #   -> every member gets {"type":"receipt",...}; GET /conversations/:id shows each member's watermarks
 # WebSocket: {"type":"typing","conversationId":"dm:alice:bob"} -> the others get {"type":"typing",...}
+
+@group = grp:<id from the create response>
+
+### Create a group (the creator is admin; at most 256 members including them)
+POST {{server}}/groups
+x-username: {{me}}
+content-type: application/json
+
+{ "title": "Weekend", "members": ["{{other}}"] }
+
+### Add a member (admins only)
+POST {{server}}/groups/{{group}}/members
+x-username: {{me}}
+content-type: application/json
+
+{ "username": "carol" }
+
+### Remove a member (admins), or leave (your own username)
+DELETE {{server}}/groups/{{group}}/members/carol
+x-username: {{me}}

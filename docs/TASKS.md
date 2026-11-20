@@ -71,9 +71,16 @@
 
 ## 6. Group chat
 
-- [ ] Create a group, add and remove members (max 256)
-- [ ] Fan-out per member in the delivery consumer
-- [ ] "Read by" receipts per member
+- [x] `POST /groups`, `POST /groups/:id/members`, `DELETE /groups/:id/members/:username` (admin or self)
+- [x] Max 256 members including the creator; the last admin leaving promotes another member
+- [x] Membership changes are system messages in `chat.messages`: ordered with the chat, pushed to all,
+      and to the removed member through `alsoNotify`
+- [x] Fan-out per member in the delivery consumer (one Redis pipeline, one publish per server)
+- [x] "Read by" per member: the tick tooltip lists readers, delivered and waiting
+- [x] Web: new-group form, group info panel (add, remove, leave), sender names in bubbles,
+      "no longer a member" state
+- [x] Verified: 21 checks with 50 members over 2 servers (fan-out to all 50 in 16 ms; 256 members in
+      20 ms; a 257th member rejected), admin rules, removal and promotion; UI run with three users
 
 ## 7. Wrap-up
 

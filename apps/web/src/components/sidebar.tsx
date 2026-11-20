@@ -49,6 +49,8 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
         {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
       </form>
 
+      <NewGroup client={client} />
+
       <ul className="flex-1 overflow-y-auto">
         {store.sortedConversations().map((c) => (
           <li key={c.conversationId}>
@@ -113,5 +115,74 @@ function ConnectionBadge({ client }: { client: ChatClient }) {
         </button>
       )}
     </span>
+  );
+}
+
+function NewGroup({ client }: { client: ChatClient }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [members, setMembers] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  if (!open) {
+    return (
+      <button
+        className="border-b px-3 py-2 text-left text-sm text-[#008069] hover:bg-[#f5f6f6]"
+        onClick={() => setOpen(true)}
+      >
+        + New group
+      </button>
+    );
+  }
+  return (
+    <form
+      className="space-y-2 border-b p-3"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setError(null);
+        try {
+          const usernames = members
+            .split(/[\s,]+/)
+            .map((u) => u.trim().toLowerCase())
+            .filter(Boolean);
+          const id = await client.createGroup(title.trim(), usernames);
+          setTitle("");
+          setMembers("");
+          setOpen(false);
+          await client.open(id);
+        } catch (e) {
+          setError((e as Error).message);
+        }
+      }}
+    >
+      <label className="block text-xs font-medium" htmlFor="group-title">
+        Group name
+      </label>
+      <input
+        id="group-title"
+        className="w-full rounded border px-2 py-1 text-sm"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        required
+        maxLength={60}
+      />
+      <label className="block text-xs font-medium" htmlFor="group-members">
+        Members (comma separated)
+      </label>
+      <input
+        id="group-members"
+        className="w-full rounded border px-2 py-1 text-sm"
+        value={members}
+        onChange={(e) => setMembers(e.target.value)}
+        placeholder="bob, carol"
+      />
+      {error && <p className="text-xs text-red-700">{error}</p>}
+      <div className="flex gap-2">
+        <button className="rounded bg-[#008069] px-3 py-1 text-sm text-white">Create group</button>
+        <button type="button" className="text-sm text-gray-600" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }

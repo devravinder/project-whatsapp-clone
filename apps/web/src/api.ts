@@ -64,6 +64,22 @@ export function api(username: string) {
         `/conversations/${encodeURIComponent(id)}/messages?${params}`,
       );
     },
+    createGroup: (title: string, members: string[]) =>
+      request<ConversationSummary>(username, "/groups", {
+        method: "POST",
+        body: json({ title, members }),
+      }),
+    addMember: (id: string, member: string) =>
+      request<null>(username, `/groups/${encodeURIComponent(id)}/members`, {
+        method: "POST",
+        body: json({ username: member }),
+      }),
+    removeMember: (id: string, member: string) =>
+      request<null>(
+        username,
+        `/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(member)}`,
+        { method: "DELETE" },
+      ),
     send: (id: string, clientMsgId: string, body: string) =>
       request<SendAck>(username, `/conversations/${encodeURIComponent(id)}/messages`, {
         method: "POST",

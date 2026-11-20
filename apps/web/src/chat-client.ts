@@ -167,8 +167,10 @@ export class ChatClient {
       case "message": {
         this.store.addMessages([event.message]);
         this.queueReceipts([event.message.conversationId]);
-        if (!this.store.conversations.has(event.message.conversationId)) {
-          void this.refreshConversations();
+        if (event.message.kind === "system") {
+          void this.membershipChanged(event.message.conversationId);
+        } else if (!this.store.conversations.has(event.message.conversationId)) {
+          void this.refreshConversations().catch(() => undefined);
         }
         break;
       }
@@ -216,9 +218,7 @@ export class ChatClient {
       );
     }
     this.queueReceipts(todo.map((c) => c.conversationId));
-    if (this.store.activeId) {
-      this.store.setDetail(await this.api.detail(this.store.activeId));
-    }
+    if (this.store.activeId) await this.loadDetail(this.store.activeId);
     this.flushOutbox();
   }
 
@@ -281,9 +281,38 @@ export class ChatClient {
       this.store.hasOlder.set(conversationId, true);
     }
     this.queueReceipts([conversationId]);
-    // Offline: the local history is shown; the detail (members, ticks) arrives with the next sync.
-    const detail = await this.api.detail(conversationId).catch(() => null);
-    if (detail) this.store.setDetail(detail);
+    await this.loadDetail(conversationId);
+  }
+
+  // Offline: the local history is shown; the detail (members, ticks) arrives with the next sync.
+  private async loadDetail(conversationId: string): Promise<void> {
+    try {
+      this.store.setDetail(await this.api.detail(conversationId));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) this.store.markLeft(conversationId);
+    }
+  }
+
+  // A system message means members changed: refresh the list and the members (maybe it was us).
+  private async membershipChanged(conversationId: string): Promise<void> {
+    await this.refreshConversations().catch(() => undefined);
+    if (this.store.details.has(conversationId) || this.store.activeId === conversationId) {
+      await this.loadDetail(conversationId);
+    }
+  }
+
+  async createGroup(title: string, members: string[]): Promise<string> {
+    const summary = await this.api.createGroup(title, members);
+    this.store.upsertConversation(summary);
+    return summary.conversationId;
+  }
+
+  addMember(conversationId: string, username: string): Promise<unknown> {
+    return this.api.addMember(conversationId, username.trim().toLowerCase());
+  }
+
+  removeMember(conversationId: string, username: string): Promise<unknown> {
+    return this.api.removeMember(conversationId, username);
   }
 
   async loadOlder(conversationId: string): Promise<void> {

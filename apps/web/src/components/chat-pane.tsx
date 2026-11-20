@@ -4,6 +4,7 @@ import type { ChatClient } from "../chat-client.js";
 import { lastSeenText, timeOf } from "../format.js";
 import { type LocalMessage, messageKey, useStore } from "../store.js";
 import { tickOf, tickTitle } from "../ticks.js";
+import { GroupInfo } from "./group-info.js";
 
 export function ChatPane({
   client,
@@ -20,7 +21,9 @@ export function ChatPane({
   const newest = timeline.at(-1);
   const title = detail?.title ?? summary?.title ?? conversationId;
   const typing = store.typingIn(conversationId);
-  const isGroup = summary?.kind === "group";
+  const isGroup = (detail?.kind ?? summary?.kind) === "group";
+  const left = store.left.has(conversationId);
+  const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
@@ -36,43 +39,64 @@ export function ChatPane({
         : lastSeenText(store.presence.get(title));
 
   return (
-    <section className="flex min-w-0 flex-1 flex-col">
-      <header className="bg-[#f0f2f5] px-4 py-3">
-        <h2 className="font-semibold">{title}</h2>
-        <p className="truncate text-xs text-gray-600" aria-live="polite">
-          {subtitle}
-        </p>
-      </header>
-
-      <div className="flex-1 overflow-y-auto px-8 py-4">
-        {store.hasOlder.get(conversationId) && (
-          <div className="mb-3 text-center">
-            <button
-              className="rounded bg-white px-3 py-1 text-sm shadow"
-              onClick={() => void client.loadOlder(conversationId)}
-            >
-              Load older messages
-            </button>
+    <div className="flex min-w-0 flex-1">
+      <section className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between gap-2 bg-[#f0f2f5] px-4 py-3">
+          <div className="min-w-0">
+            <h2 className="font-semibold">{title}</h2>
+            <p className="truncate text-xs text-gray-600" aria-live="polite">
+              {subtitle}
+            </p>
           </div>
-        )}
-        {timeline.map((m) => (
-          <Bubble
-            key={messageKey(m)}
-            message={m}
-            me={client.username}
-            detail={detail}
-            showSender={isGroup}
-            onRetry={() => client.retry(m)}
-          />
-        ))}
-        <div ref={bottom} />
-      </div>
+          {isGroup && detail && !left && (
+            <button
+              className="shrink-0 text-sm text-[#008069] hover:underline"
+              onClick={() => setShowInfo((v) => !v)}
+            >
+              Group info
+            </button>
+          )}
+        </header>
 
-      <Composer
-        onTyping={() => client.typing(conversationId)}
-        onSend={(body) => client.send(conversationId, body)}
-      />
-    </section>
+        <div className="flex-1 overflow-y-auto px-8 py-4">
+          {store.hasOlder.get(conversationId) && (
+            <div className="mb-3 text-center">
+              <button
+                className="rounded bg-white px-3 py-1 text-sm shadow"
+                onClick={() => void client.loadOlder(conversationId)}
+              >
+                Load older messages
+              </button>
+            </div>
+          )}
+          {timeline.map((m) => (
+            <Bubble
+              key={messageKey(m)}
+              message={m}
+              me={client.username}
+              detail={detail}
+              showSender={isGroup}
+              onRetry={() => client.retry(m)}
+            />
+          ))}
+          <div ref={bottom} />
+        </div>
+
+        {left ? (
+          <p className="bg-[#f0f2f5] px-4 py-3 text-center text-sm text-gray-600">
+            You are no longer a member of this group.
+          </p>
+        ) : (
+          <Composer
+            onTyping={() => client.typing(conversationId)}
+            onSend={(body) => client.send(conversationId, body)}
+          />
+        )}
+      </section>
+      {showInfo && isGroup && detail && !left && (
+        <GroupInfo client={client} detail={detail} onClose={() => setShowInfo(false)} />
+      )}
+    </div>
   );
 }
 

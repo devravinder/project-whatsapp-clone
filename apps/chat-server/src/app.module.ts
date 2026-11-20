@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ChatController } from "./chat/chat.controller.js";
 import { ChatRepository } from "./chat/chat.repository.js";
 import { ConversationsService } from "./chat/conversations.service.js";
+import { GroupsService } from "./chat/groups.service.js";
 import { MessagesService } from "./chat/messages.service.js";
 import { ReceiptsService } from "./chat/receipts.service.js";
 import { UsersService } from "./chat/users.service.js";
@@ -30,6 +31,7 @@ import { RedisRouter, ROUTER } from "./realtime/router.js";
     ConversationsService,
     MessagesService,
     ReceiptsService,
+    GroupsService,
     LocalConnections,
     Directory,
     RedisRouter,

@@ -33,7 +33,9 @@ export class MessagesService {
   ) {}
 
   async send(request: SendRequest): Promise<SendAck> {
-    if (!(await this.repo.isMember(request.conversationId, request.sender))) {
+    // System messages come from the server itself, e.g. after the actor has just left the group.
+    const system = request.kind === "system";
+    if (!system && !(await this.repo.isMember(request.conversationId, request.sender))) {
       throw new ForbiddenException("not a member of this conversation");
     }
     const redis = await this.redis.connected();

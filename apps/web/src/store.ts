@@ -42,6 +42,8 @@ export class ChatStore {
   readonly messages = new Map<string, Map<string, LocalMessage>>();
   readonly hasOlder = new Map<string, boolean>();
   readonly presence = new Map<string, Presence>();
+  // Groups this user was removed from or left: history stays readable, sending is off.
+  readonly left = new Set<string>();
   // conversationId -> username -> when the indicator stops.
   readonly typing = new Map<string, Map<string, number>>();
   activeId: string | null = null;
@@ -184,7 +186,13 @@ export class ChatStore {
   }
 
   setDetail(detail: ConversationDetail): void {
+    this.left.delete(detail.conversationId);
     this.details.set(detail.conversationId, detail);
+    this.changed();
+  }
+
+  markLeft(conversationId: string): void {
+    this.left.add(conversationId);
     this.changed();
   }
 
