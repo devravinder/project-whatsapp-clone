@@ -1,0 +1,9 @@
+# Store and check out LF everywhere.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.mp4 binary

@@ -1,0 +1,21 @@
+node_modules/
+.pnpm-store/
+
+dist/
+*.tsbuildinfo
+coverage/
+
+.env
+.env.*
+!.env.sample
+!.env.development
+*.local
+
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Registry-specific image paths (infra/retag-images.ps1).
+infra/retag-images.local.json

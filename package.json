@@ -1,0 +1,34 @@
+{
+  "name": "project-whatsapp-clone",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Learning-oriented mini WhatsApp clone - chat system design with Kafka, Cassandra and Redis",
+  "type": "module",
+  "packageManager": "pnpm@12.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "start:pods": "docker compose -f infra/docker-compose.yaml up -d",
+    "stop:pods": "docker compose -f infra/docker-compose.yaml down",
+    "reset:pods": "docker compose -f infra/docker-compose.yaml down -v",
+    "logs:pods": "docker compose -f infra/docker-compose.yaml logs -f",
+    "db:schema": "docker compose -f infra/docker-compose.yaml run --rm cassandra-schema",
+    "start:server": "pnpm --filter @wa/chat-server dev",
+    "start:web": "pnpm --filter @wa/web dev",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"#**/node_modules\"",
+    "format:md": "markdownlint-cli2 --fix \"**/*.md\" \"#**/node_modules\""
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.1.0",
+    "markdownlint-cli2": "^0.15.0",
+    "oxlint": "^1.0.0",
+    "prettier": "^3.5.3"
+  }
+}

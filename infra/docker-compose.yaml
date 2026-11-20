@@ -1,0 +1,108 @@
+# Local infrastructure only; the chat servers and web app run on the host.
+# Host ports avoid the defaults so this can run next to other projects.
+name: whatsapp-clone
+
+services:
+  cassandra:
+    image: cassandra:3.11.9
+    container_name: wa-cassandra
+    restart: unless-stopped
+    environment:
+      CASSANDRA_CLUSTER_NAME: wa-local
+      # Defaults size the heap from host RAM; one dev node needs far less.
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 128M
+    ports:
+      - "9042:9042"
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'SELECT release_version FROM system.local' >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  # One-shot: applies infra/cassandra/schema/*.cql in name order; every file is re-runnable.
+  cassandra-schema:
+    image: cassandra:3.11.9
+    container_name: wa-cassandra-schema
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./cassandra/schema:/schema:ro
+    entrypoint: >
+      /bin/bash -c "
+      set -e;
+      for f in /schema/*.cql; do echo \"Applying $$f\"; cqlsh cassandra -f \"$$f\"; done;
+      echo 'Cassandra schema ready'
+      "
+
+  kafka:
+    image: bitnami/kafka:3.5.1
+    container_name: wa-kafka
+    restart: unless-stopped
+    environment:
+      # Fixed id so the data volume stays valid across container re-creates.
+      KAFKA_KRAFT_CLUSTER_ID: V2hhdHNBcHBDbG9uZUxvYw
+      KAFKA_CFG_NODE_ID: 0
+      KAFKA_CFG_PROCESS_ROLES: controller,broker
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 0@kafka:9093
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # INTERNAL for containers, EXTERNAL (localhost:9095) for servers on the host.
+      KAFKA_CFG_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,EXTERNAL://:9095
+      KAFKA_CFG_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9095
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # Topics are created on purpose by kafka-setup, never by a typo in a client.
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    ports:
+      - "9095:9095"
+    volumes:
+      - kafka-data:/bitnami/kafka
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # One-shot: creates topics. Key = conversationId, so a conversation stays in order.
+  # retention.ms=-1: the message log is the source of truth and can rebuild Cassandra.
+  kafka-setup:
+    image: bitnami/kafka:3.5.1
+    container_name: wa-kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: >
+      /bin/bash -c "
+      kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic chat.messages
+      --partitions 6 --replication-factor 1 --config retention.ms=-1 &&
+      kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic chat.receipts
+      --partitions 6 --replication-factor 1 --config retention.ms=604800000 &&
+      echo 'Topics ready: chat.messages (6 partitions, kept forever), chat.receipts (6 partitions, 7 days)'
+      "
+
+  # Routing, presence and typing only: nothing here must survive a restart.
+  redis:
+    image: redis:6.2.24
+    container_name: wa-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  cassandra-data:
+  kafka-data:

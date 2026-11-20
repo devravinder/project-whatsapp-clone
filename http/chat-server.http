@@ -1,0 +1,4 @@
+@server = http://localhost:4001
+
+### Health: 200 when Cassandra, Redis and Kafka all answer; 503 lists what is down
+GET {{server}}/health
