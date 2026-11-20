@@ -1,4 +1,56 @@
 @server = http://localhost:4001
+@me = alice
+@other = bob
+@conversation = dm:alice:bob
 
 ### Health: 200 when Cassandra, Redis and Kafka all answer; 503 lists what is down
 GET {{server}}/health
+
+### Register (or "log in" as) a username - there is no password
+POST {{server}}/users
+content-type: application/json
+
+{ "username": "{{me}}" }
+
+### Register the other side too
+POST {{server}}/users
+content-type: application/json
+
+{ "username": "{{other}}" }
+
+### Does a user exist?
+GET {{server}}/users/{{other}}
+
+### Start (or reopen) a 1:1 chat; the id is dm:<a>:<b>, sorted
+POST {{server}}/conversations/direct
+x-username: {{me}}
+content-type: application/json
+
+{ "with": "{{other}}" }
+
+### My conversations, most recent first
+GET {{server}}/conversations
+x-username: {{me}}
+
+### Conversation detail with members
+GET {{server}}/conversations/{{conversation}}
+x-username: {{me}}
+
+### Send: 202 once Kafka has it. Re-send with the same clientMsgId: same messageId, stored once
+POST {{server}}/conversations/{{conversation}}/messages
+x-username: {{me}}
+content-type: application/json
+
+{ "clientMsgId": "6f1c2d3e-0000-4000-8000-000000000001", "body": "hello" }
+
+### Newest page (oldest first in the response); hasMore = older pages exist
+GET {{server}}/conversations/{{conversation}}/messages?limit=20
+x-username: {{me}}
+
+### Older page: before = the oldest messageId you have
+GET {{server}}/conversations/{{conversation}}/messages?limit=20&before=<messageId>
+x-username: {{me}}
+
+### Catch up: after = the newest messageId you have
+GET {{server}}/conversations/{{conversation}}/messages?after=<messageId>
+x-username: {{me}}

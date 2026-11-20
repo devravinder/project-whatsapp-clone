@@ -14,6 +14,11 @@ description: Query-first Cassandra modelling and schema files for this project. 
 - **Clustering key** = sort order inside the partition. Messages use a `TIMEUUID` with
   `CLUSTERING ORDER BY (message_id DESC)`, so "newest 50" is one slice read.
 - **Writes are upserts.** Inserting the same primary key overwrites; that is what makes Kafka replays safe.
+- **`USING TIMESTAMP` for "newest wins".** Every cell keeps its write time and the latest wins. Writing
+  with the message's own time (`writeTimeOf(messageId)`) makes an older replayed message lose
+  automatically - no read-before-write. Never mix it with normal writes on the same cell.
+- **Logged batches** only for a few statements that must all apply (member row + list row); never as
+  a bulk-load speed-up.
 - No joins, no `ALLOW FILTERING`, no secondary indexes on high-cardinality columns.
 - Lightweight transactions (`IF NOT EXISTS`) cost a Paxos round; use only where uniqueness matters.
 - Use prepared statements (`{ prepare: true }`) for every query with parameters.

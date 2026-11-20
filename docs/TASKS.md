@@ -16,13 +16,16 @@
 
 ## 1. 1:1 chats over REST
 
-- [ ] Users: pick a username (no password)
-- [ ] Cassandra tables: `conversations_by_user`, `messages_by_conversation`
-- [ ] Start a 1:1 conversation (deterministic id from the two usernames)
-- [ ] Send: produce to `chat.messages` (acks=all), TIMEUUID message id, `clientMsgId` dedupe
-- [ ] Persister consumer group writes Cassandra (upsert, replay-safe)
-- [ ] History paging, newest first
-- [ ] Web: username screen, conversation list, chat view
+- [x] Users: pick a username (no password); `POST /users` uses `IF NOT EXISTS`
+- [x] Cassandra tables (`002_chat.cql`): `users`, `conversations`, `members_by_conversation`,
+      `conversations_by_user`, `messages_by_conversation`
+- [x] Start a 1:1 conversation (deterministic id `dm:<a>:<b>` from the sorted usernames)
+- [x] Send: produce to `chat.messages` (acks=all), TIMEUUID message id, `clientMsgId` dedupe in Redis
+- [x] Persister consumer group writes Cassandra (upsert, replay-safe, `USING TIMESTAMP` for previews)
+- [x] History paging: newest page, `before` and `after` cursors
+- [x] Web: username screen, conversation list, chat view (polls every 3 s until Task 2)
+- [x] Verified: 21 end-to-end checks (dedupe, paging, 401/403/404/400); all 61 records of one
+      conversation on one partition; persister lag 0
 
 ## 2. Realtime on one server
 

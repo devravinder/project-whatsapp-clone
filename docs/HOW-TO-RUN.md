@@ -35,6 +35,16 @@ setup containers wait for it. The web page shows OK for Cassandra, Redis and Kaf
 
 Check from a terminal: `curl http://localhost:4001/health` (503 lists what is down).
 
+## Try it
+
+1. Open <http://localhost:5180> in two tabs. The username lives in the tab (`sessionStorage`), so each
+   tab can be a different user: `alice` in one, `bob` in the other.
+2. In alice's tab, start a chat with `bob` and send a message.
+3. Bob's tab shows it within 3 s (Task 1 polls; Task 2 replaces that with a WebSocket).
+
+The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
+HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.
+
 ## Ports
 
 | What          | Port |

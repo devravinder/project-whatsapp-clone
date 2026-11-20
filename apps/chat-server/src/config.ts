@@ -11,6 +11,8 @@ const configSchema = z.object({
   CASSANDRA_KEYSPACE: z.string().min(1),
   REDIS_URL: z.url(),
   KAFKA_BROKERS: list,
+  // Override to rebuild Cassandra from the log with a fresh group (Task 7).
+  PERSISTER_GROUP: z.string().min(1).default("persister"),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

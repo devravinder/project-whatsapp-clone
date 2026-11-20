@@ -13,10 +13,17 @@ export class RedisService implements OnModuleDestroy {
     this.client.on("error", () => undefined);
   }
 
-  async ping(): Promise<string> {
-    this.connecting ??= this.client.connect();
+  async connected(): Promise<RedisClientType> {
+    this.connecting ??= this.client.connect().catch((error: unknown) => {
+      this.connecting = undefined;
+      throw error;
+    });
     await this.connecting;
-    return `redis ${await this.client.ping()}`;
+    return this.client;
+  }
+
+  async ping(): Promise<string> {
+    return `redis ${await (await this.connected()).ping()}`;
   }
 
   async onModuleDestroy(): Promise<void> {

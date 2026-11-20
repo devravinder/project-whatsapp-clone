@@ -71,3 +71,41 @@ are both consumers of the log, so either can fall behind or crash without losing
 | Receipts                | Kafka `chat.receipts` | Fan back to the sender (Task 4)        |
 | User → server, presence | Redis with TTL        | Lost on restart, rebuilt by reconnects |
 | Typing                  | Redis pub/sub only    | Worthless a few seconds later          |
+
+## 4. Cassandra tables
+
+```mermaid
+erDiagram
+  USERS ||--o{ MEMBERS_BY_CONVERSATION : "is member"
+  CONVERSATIONS ||--o{ MEMBERS_BY_CONVERSATION : has
+  CONVERSATIONS ||--o{ MESSAGES_BY_CONVERSATION : holds
+  USERS ||--o{ CONVERSATIONS_BY_USER : lists
+  USERS {
+    text username PK
+  }
+  CONVERSATIONS {
+    text conversation_id PK
+    text kind
+    text title
+  }
+  MEMBERS_BY_CONVERSATION {
+    text conversation_id PK
+    text username "clustering"
+    text role
+  }
+  CONVERSATIONS_BY_USER {
+    text username PK
+    text conversation_id "clustering"
+    timeuuid last_message_id
+    text last_preview
+  }
+  MESSAGES_BY_CONVERSATION {
+    text conversation_id PK
+    timeuuid message_id "clustering DESC"
+    text sender
+    text body
+  }
+```
+
+Lines show where data is duplicated, not joins: Cassandra has none. Each table answers one query
+(ADR-005).

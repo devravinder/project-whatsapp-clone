@@ -1,38 +1,82 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { register } from "./api.js";
+import { ChatApp } from "./components/chat-app.js";
 
-type Check = { ok: boolean; detail: string };
-type Health = { server: string; cassandra: Check; redis: Check; kafka: Check };
+// Per tab, so two tabs can be two users side by side.
+const SESSION_KEY = "wa.username";
 
 export function App() {
-  const [health, setHealth] = useState<Health | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState(() => sessionStorage.getItem(SESSION_KEY));
 
-  useEffect(() => {
-    fetch("/api/health")
-      .then(async (response) => {
-        // 503 still carries the per-dependency body.
-        setHealth(await response.json());
-      })
-      .catch((e: Error) => setError(e.message));
-  }, []);
+  if (!username) {
+    return (
+      <Login
+        onDone={(name) => {
+          sessionStorage.setItem(SESSION_KEY, name);
+          setUsername(name);
+        }}
+      />
+    );
+  }
+  return (
+    <ChatApp
+      key={username}
+      username={username}
+      onLogout={() => {
+        sessionStorage.removeItem(SESSION_KEY);
+        setUsername(null);
+      }}
+    />
+  );
+}
+
+function Login({ onDone }: { onDone: (username: string) => void }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   return (
-    <main className="mx-auto max-w-xl p-8 font-sans">
-      <h1 className="text-2xl font-semibold text-[#008069]">Mini WhatsApp</h1>
-      <p className="mt-1 text-sm text-gray-600">Task 0: the stack is wired up.</p>
-      {error && <p className="mt-6 text-red-700">Chat server unreachable: {error}</p>}
-      {health && (
-        <section className="mt-6">
-          <h2 className="font-medium">{health.server}</h2>
-          <ul className="mt-2 space-y-1">
-            {(["cassandra", "redis", "kafka"] as const).map((name) => (
-              <li key={name} className={health[name].ok ? "text-green-800" : "text-red-700"}>
-                {health[name].ok ? "OK" : "DOWN"} - {name}: {health[name].detail}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+    <main className="flex min-h-screen items-center justify-center bg-[#eae6df]">
+      <form
+        className="w-80 rounded-lg bg-white p-6 shadow"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError(null);
+          try {
+            onDone((await register(name.trim().toLowerCase())).username);
+          } catch (e) {
+            setError((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h1 className="text-xl font-semibold text-[#008069]">Mini WhatsApp</h1>
+        <p className="mt-1 text-sm text-gray-600">
+          Pick a username. There is no password: anyone typing the same name is you.
+        </p>
+        <label className="mt-4 block text-sm font-medium" htmlFor="username">
+          Username
+        </label>
+        <input
+          id="username"
+          autoFocus
+          className="mt-1 w-full rounded border px-3 py-2"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="alice"
+          pattern="[a-zA-Z0-9_]{3,20}"
+          required
+        />
+        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+        <button
+          className="mt-4 w-full rounded bg-[#008069] py-2 font-medium text-white disabled:opacity-60"
+          disabled={busy}
+        >
+          Continue
+        </button>
+      </form>
     </main>
   );
 }

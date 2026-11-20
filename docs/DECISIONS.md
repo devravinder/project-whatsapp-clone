@@ -80,3 +80,62 @@ Date: 2026-11-06 - Status: Accepted
 "Cannot read properties of undefined"). Every constructor parameter uses `@Inject(Token)`.
 
 Rejected: building with `tsc` or SWC for metadata - a build step for no other benefit.
+
+## ADR-005 - Cassandra tables, one per query
+
+Date: 2026-11-06 - Status: Accepted
+
+| Query                        | Table                      | Partition key     | Clustering        |
+| ---------------------------- | -------------------------- | ----------------- | ----------------- |
+| Does user X exist?           | `users`                    | `username`        | -                 |
+| What is conversation C?      | `conversations`            | `conversation_id` | -                 |
+| Who is in C? (fan-out list)  | `members_by_conversation`  | `conversation_id` | `username`        |
+| My conversations + last text | `conversations_by_user`    | `username`        | `conversation_id` |
+| History of C, newest first   | `messages_by_conversation` | `conversation_id` | `message_id` DESC |
+
+- **Direct ids are derived:** `dm:<a>:<b>` with the names sorted. Both sides compute the same id, so
+  "start chat" needs no lookup and is idempotent.
+- **Message ids are TIMEUUIDs:** time-ordered and unique, assigned by the server before producing.
+  Clients compare them by the embedded timestamp (`compareTimeuuid` in `@wa/protocol`), never as strings.
+- **Last message per member, fan-out on write:** the persister updates `conversations_by_user` for
+  every member, so the list is one partition read. The writes use `USING TIMESTAMP` = the message's
+  time, so Cassandra's last-write-wins keeps the newest message even if an older one is replayed later.
+- **The list is sorted in the server**, not by a clustering key: a clustering column cannot be updated,
+  so ordering by "last activity" would need a delete plus insert per message.
+- **Membership changes use a logged batch** (member row + list row), atomic across two partitions.
+- **Registration uses `IF NOT EXISTS`** (a lightweight transaction, one Paxos round).
+- **Paging:** `LIMIT n+1` tells whether another page exists. `before` reads the natural DESC order;
+  `after` uses `ORDER BY message_id ASC`. Responses are always oldest first.
+
+Trade-off: a conversation partition grows without limit. Fine for a demo; production would add a time
+bucket (e.g. month) to the partition key and page across buckets.
+
+Rejected: a single `messages` table with a secondary index on sender or conversation - scatter-gather
+reads across every node.
+
+## ADR-006 - Idempotent send with a client message id
+
+Date: 2026-11-06 - Status: Accepted
+
+The client generates `clientMsgId` (a UUID) before sending and reuses it on every retry. The server
+claims `dedupe:<sender>:<clientMsgId>` in Redis with `SET NX EX 86400` before producing:
+
+- Claimed: produce, then store the ack under the key. A failed produce deletes the key, so the retry
+  can produce.
+- Already claimed with an ack: return the same ack; nothing is produced again.
+- Already claimed, still in flight: 409, the client retries shortly.
+
+Even if Redis forgets the key, the duplicate would be a new `messageId`, and clients key messages by
+`sender:clientMsgId`, so the UI still shows one bubble.
+
+Rejected: a lightweight transaction on a Cassandra `client_msg_id` table - a Paxos round on every send,
+and Cassandra is written by the persister, not the send path (ADR-002).
+
+## ADR-007 - No login: the caller names itself
+
+Date: 2026-11-06 - Status: Accepted
+
+REST calls carry `x-username`; the WebSocket sends the username as its first message (Task 2). The
+server checks only that the user exists and is a member of the conversation. This is fine on one
+machine and unsafe anywhere else; a real deployment would use OIDC tokens and take the identity from
+the verified `sub` claim.
