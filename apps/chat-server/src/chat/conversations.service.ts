@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable } from "@nestjs/common";
 import {
   compareTimeuuid,
+  isAtOrAfter,
   type ConversationDetail,
   type ConversationSummary,
   directConversationId,
@@ -8,6 +9,9 @@ import {
 } from "@wa/protocol";
 import { ChatRepository } from "./chat.repository.js";
 import { UsersService } from "./users.service.js";
+
+// Shown as "99+" past this; also bounds the rows read per conversation.
+export const UNREAD_CAP = 100;
 
 @Injectable()
 export class ConversationsService {
@@ -36,11 +40,28 @@ export class ConversationsService {
   // Sorted here, not by Cassandra: a clustering key cannot change when a new message arrives.
   async list(me: string): Promise<ConversationSummary[]> {
     const rows = await this.repo.conversationsOf(me);
-    const summaries = rows.map((row) => ({ ...row, unread: 0 }));
+    const summaries = await Promise.all(
+      rows.map(async (row) => ({
+        ...row,
+        unread: await this.unread(row.conversationId, me, row.lastMessage?.messageId),
+      })),
+    );
     return summaries.sort((a, b) => {
       if (!a.lastMessage || !b.lastMessage) return a.lastMessage ? -1 : b.lastMessage ? 1 : 0;
       return compareTimeuuid(b.lastMessage.messageId, a.lastMessage.messageId);
     });
+  }
+
+  // Messages after my read watermark. Mine never count: sending moves my own watermark (ADR-011).
+  private async unread(
+    conversationId: string,
+    me: string,
+    lastId: string | undefined,
+  ): Promise<number> {
+    if (!lastId) return 0;
+    const readUpTo = await this.repo.readUpTo(conversationId, me);
+    if (isAtOrAfter(readUpTo, lastId)) return 0;
+    return this.repo.countAfter(conversationId, readUpTo, UNREAD_CAP);
   }
 
   async requireMember(conversationId: string, me: string): Promise<void> {

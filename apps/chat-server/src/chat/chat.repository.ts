@@ -263,6 +263,34 @@ export class ChatRepository {
     );
   }
 
+  async readUpTo(conversationId: string, username: string): Promise<string | null> {
+    const row = (
+      await this.db.execute(
+        "SELECT read_up_to FROM read_state WHERE conversation_id = ? AND username = ?",
+        [conversationId, username],
+        PREPARED,
+      )
+    ).first();
+    const value = row?.get("read_up_to");
+    return value ? String(value) : null;
+  }
+
+  // Counts by reading ids only, capped: the UI shows "99+" anyway, and COUNT(*) scans everything.
+  async countAfter(conversationId: string, after: string | null, cap: number): Promise<number> {
+    const result = after
+      ? await this.db.execute(
+          "SELECT message_id FROM messages_by_conversation WHERE conversation_id = ? AND message_id > ? LIMIT ?",
+          [conversationId, after, cap],
+          PREPARED,
+        )
+      : await this.db.execute(
+          "SELECT message_id FROM messages_by_conversation WHERE conversation_id = ? LIMIT ?",
+          [conversationId, cap],
+          PREPARED,
+        );
+    return result.rowLength;
+  }
+
   async history(
     conversationId: string,
     query: { before?: string; after?: string; limit: number },

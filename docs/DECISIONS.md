@@ -357,3 +357,39 @@ Rejected:
   systems; not here, where sync is per conversation (ADR-013).
 - A separate membership-events topic: ordering between "bob was removed" and the next message would
   then depend on two topics.
+
+## ADR-016 - Unread counts from the read watermark
+
+Date: 2026-11-06 - Status: Accepted
+
+- **Unread = messages after my `read_up_to`,** counted per conversation when the list is fetched:
+  `SELECT message_id ... WHERE message_id > ? LIMIT 100`, one slice of one partition. A conversation
+  whose last message is at or before the watermark costs no query.
+- **My own messages never count:** the persister moves the sender's read watermark to every message
+  they send (ADR-011), so "unread" only ever covers other people's messages after my last read or
+  last message.
+- **Capped at 100,** shown as "99+": an exact count of 50,000 unread would read 50,000 ids.
+- **Between syncs the browser counts:** a live message from someone else in a chat that is not open
+  and visible adds one; sending a read receipt clears it. The next list from the server replaces the
+  local number, so drift cannot build up.
+
+Rejected: Cassandra counters - they cannot be reset to zero safely (a counter only adds), are not
+idempotent under replay, and would be one more write per member per message.
+
+## ADR-017 - Rebuilding the read model from the log
+
+Date: 2026-11-06 - Status: Accepted
+
+`pnpm db:rebuild` (`scripts/rebuild-read-model.mjs`) shows ADR-002 in practice: it truncates
+`messages_by_conversation`, starts a third server process (port 4009) with
+`PERSISTER_GROUP=persister-rebuild-<time>`, and waits until Cassandra holds as many messages as
+`chat.messages` holds records. A new group has no committed offsets, so it starts at offset 0.
+
+- Safe while the normal servers run: every write is an upsert, previews and watermarks use
+  message-time timestamps, so the two persisters can process the same record in any order.
+- Measured: 512 messages back in 12 s, most of it the group join.
+- The extra process also joins `delivery` and `receipts`, which causes one rebalance of those groups
+  when it starts and one when it stops.
+
+Rejected: resetting the offsets of the existing `persister` group - it needs every server stopped
+first (`kafka-consumer-groups.sh --reset-offsets` refuses while members are active).

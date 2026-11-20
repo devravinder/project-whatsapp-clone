@@ -165,8 +165,12 @@ export class ChatClient {
         void this.sync().catch((error: Error) => console.warn("sync failed:", error.message));
         break;
       case "message": {
-        this.store.addMessages([event.message]);
-        this.queueReceipts([event.message.conversationId]);
+        const added = this.store.addMessages([event.message]);
+        const m = event.message;
+        if (added.length > 0 && m.sender !== this.username && !this.isReading(m.conversationId)) {
+          this.store.bumpUnread(m.conversationId);
+        }
+        this.queueReceipts([m.conversationId]);
         if (event.message.kind === "system") {
           void this.membershipChanged(event.message.conversationId);
         } else if (!this.store.conversations.has(event.message.conversationId)) {
@@ -419,9 +423,14 @@ export class ChatClient {
     const newest = this.store.newestFromOthers(conversationId, this.username);
     if (!newest) return;
     this.report(conversationId, "delivered", newest);
-    const reading =
-      this.store.activeId === conversationId && document.visibilityState === "visible";
-    if (reading) this.report(conversationId, "read", newest);
+    if (this.isReading(conversationId)) {
+      this.report(conversationId, "read", newest);
+      this.store.clearUnread(conversationId);
+    }
+  }
+
+  private isReading(conversationId: string): boolean {
+    return this.store.activeId === conversationId && document.visibilityState === "visible";
   }
 
   private report(conversationId: string, status: ReceiptStatus, upTo: string): void {

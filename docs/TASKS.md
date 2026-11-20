@@ -84,7 +84,13 @@
 
 ## 7. Wrap-up
 
-- [ ] Unread counts
-- [ ] Replay `chat.messages` to rebuild Cassandra (demo)
-- [ ] Linux (Ubuntu) check
-- [ ] Interview questions doc
+- [x] Unread counts: messages after my read watermark, capped at 100 ("99+"); live increments between
+      syncs; cleared when the chat is read
+- [x] `pnpm db:rebuild`: truncate the message table, replay `chat.messages` with a new persister group
+      (512 messages back in 12 s)
+- [x] Linux check: clean copy in an Alpine container (Node 24) on the compose network: frozen install,
+      oxlint, markdownlint, Prettier, typecheck, web build, `retag-images.sh`, chat-server against the
+      compose services, Task 1 and Task 2 end-to-end checks
+- [x] [Interview questions](INTERVIEW-QUESTIONS.md): 37 questions in 7 levels and 25 definitions
+- [x] Verified: 6 unread checks (sender never counts, read clears, cap), UI badge run, regression of
+      Tasks 1, 2 and 4

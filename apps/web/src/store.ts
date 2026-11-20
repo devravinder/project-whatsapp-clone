@@ -191,6 +191,19 @@ export class ChatStore {
     this.changed();
   }
 
+  // Between syncs the count moves locally; the next conversation list from the server replaces it.
+  bumpUnread(conversationId: string): void {
+    const summary = this.conversations.get(conversationId);
+    if (!summary) return;
+    this.upsertConversation({ ...summary, unread: summary.unread + 1 });
+  }
+
+  clearUnread(conversationId: string): void {
+    const summary = this.conversations.get(conversationId);
+    if (!summary || summary.unread === 0) return;
+    this.upsertConversation({ ...summary, unread: 0 });
+  }
+
   markLeft(conversationId: string): void {
     this.left.add(conversationId);
     this.changed();

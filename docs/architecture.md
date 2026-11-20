@@ -1,6 +1,6 @@
 # Architecture
 
-Target design. Parts not built yet are marked with the task that adds them (see [TASKS.md](TASKS.md)).
+How the parts fit together. The reasons and rejected options are in [DECISIONS.md](DECISIONS.md).
 
 ## 1. Components
 
@@ -27,7 +27,7 @@ flowchart LR
 | Kafka       | The message log: ordered per conversation, kept forever, replayable       |
 | Cassandra   | Read model: history and conversation lists, one table per query           |
 | Redis       | Ephemeral state: which server holds which user, presence, typing          |
-| web         | UI, local history (IndexedDB, Task 5)                                     |
+| web         | UI, local history and outbox (IndexedDB)                                  |
 
 Both consumer groups run inside chat-server to keep the project small. In production they would be
 separate deployments, scaled on their own.
@@ -68,7 +68,7 @@ are both consumers of the log, so either can fall behind or crash without losing
 | Messages (truth)        | Kafka `chat.messages` | Ordered, durable, replayable           |
 | Messages (read model)   | Cassandra             | Paged history per conversation         |
 | Conversation list       | Cassandra             | Per-user query, denormalised           |
-| Receipts                | Kafka `chat.receipts` | Fan back to the sender (Task 4)        |
+| Receipts                | Kafka `chat.receipts` | Watermarks, pushed to all members      |
 | User → server, presence | Redis with TTL        | Lost on restart, rebuilt by reconnects |
 | Typing                  | Redis pub/sub only    | Worthless a few seconds later          |
 

@@ -20,3 +20,4 @@ cloud deployment.
 - [Tasks](docs/TASKS.md)
 - [Architecture](docs/architecture.md)
 - [Decisions (ADRs)](docs/DECISIONS.md)
+- [Interview questions](docs/INTERVIEW-QUESTIONS.md)

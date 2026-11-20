@@ -81,6 +81,14 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
                   )}
                 </span>
               </span>
+              {c.unread > 0 && (
+                <span
+                  className="shrink-0 rounded-full bg-[#25d366] px-2 py-0.5 text-xs font-semibold text-white"
+                  aria-label={`${c.unread} unread`}
+                >
+                  {c.unread >= 100 ? "99+" : c.unread}
+                </span>
+              )}
             </button>
           </li>
         ))}

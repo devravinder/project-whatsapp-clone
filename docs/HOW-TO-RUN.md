@@ -58,6 +58,18 @@ Check from a terminal: `curl http://localhost:4000/health` (repeat it: the `serv
 8. Open a third tab as `carol`. In alice's tab: **+ New group**, name it, add `bob, carol`. Messages
    reach both; the ticks turn blue when both have read (hover for who). **Group info** adds, removes
    or leaves; a removed member keeps the history but can no longer send.
+9. Have carol write to bob while bob has another chat open: carol's chat gets a green unread badge;
+   opening it clears the badge (and the count on the server).
+
+## Rebuild Cassandra from Kafka
+
+```bash
+pnpm db:rebuild
+```
+
+Empties `chat.messages_by_conversation`, then replays `chat.messages` from offset 0 with a new
+persister group on a temporary third server (port 4009) until every message is back. The normal
+servers can keep running (ADR-017).
 
 The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
 HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.
@@ -85,6 +97,7 @@ Kafka and Redis use non-default host ports so this can run next to other project
 | `pnpm reset:pods`    | Stop it and **delete** all data (volumes)                |
 | `pnpm logs:pods`     | Follow the infrastructure logs                           |
 | `pnpm db:schema`     | Re-apply `infra/cassandra/schema/*.cql` (safe to repeat) |
+| `pnpm db:rebuild`    | Rebuild the message table from the Kafka log             |
 | `pnpm start:server`  | Run chat-server-1 with watch mode                        |
 | `pnpm start:server2` | Run chat-server-2 (`.env.server-2`)                      |
 | `pnpm start:web`     | Run the web app with Vite                                |
@@ -97,6 +110,13 @@ docker exec -it wa-cassandra cqlsh -k chat
 docker exec -it wa-redis redis-cli
 docker exec -it wa-kafka kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic chat.messages --from-beginning --property print.key=true
 ```
+
+## Linux (Ubuntu)
+
+The same commands work in bash. Two Linux specifics are handled in the repo: `infra/retag-images.sh`
+is the twin of the PowerShell script (committed as executable), and nginx reaches the servers on the
+host through `extra_hosts: host.docker.internal:host-gateway`. If the host firewall blocks the Docker
+bridge, allow ports 4001 and 4002 from it.
 
 ## Troubleshooting
 
