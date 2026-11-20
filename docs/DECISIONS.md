@@ -231,3 +231,45 @@ Rejected:
   does not scale with the number of servers.
 - Kafka per-server topics: durable, but a topic per server is heavy, and a push is worthless after a
   few seconds anyway.
+
+## ADR-011 - Receipts are watermarks
+
+Date: 2026-11-06 - Status: Accepted
+
+A receipt says "I have everything up to message X" (`delivered`) or "I have read everything up to X"
+(`read`). It is not "I read message X".
+
+```mermaid
+stateDiagram-v2
+  [*] --> Pending: typed
+  Pending --> Sent: Kafka ack (✓)
+  Sent --> Delivered: every other member's delivered watermark reaches it (✓✓)
+  Delivered --> Read: every other member's read watermark reaches it (blue ✓✓)
+  Pending --> Failed: nack, not retryable
+```
+
+- **Storage is one row per member** (`read_state`), not one per message and reader: a 256-member
+  group stays at 256 rows however many messages it has.
+- **Forward only, without reading first:** the receipts consumer writes `USING TIMESTAMP` = the
+  watermark message's own time. A late or replayed receipt for an older message has an older timestamp
+  and loses. `read` also writes `delivered_up_to`; each cell keeps its own newest value.
+- **Ordered with the messages:** `chat.receipts` uses the conversation id as key, like `chat.messages`.
+- **The sender has read their own message:** the persister moves the sender's read watermark, so a
+  message never counts as unread for the person who wrote it (needed for unread counts, Task 7).
+- **Clients send** `delivered` as soon as a message reaches the device (live or history) and `read`
+  only while the conversation is open and the tab visible, batched over 200 ms and only when the
+  watermark moves.
+- **Ticks are computed in the browser** from the members' watermarks (`apps/web/src/ticks.ts`); the
+  tooltip lists who has read it, who has it, who is still waiting.
+
+## ADR-012 - Typing indicators skip Kafka and Cassandra
+
+Date: 2026-11-06 - Status: Accepted
+
+A typing event is worthless a few seconds later, so it goes from the gateway straight to the router
+(Redis pub/sub) and is never stored. The client sends at most one per conversation every 2 s; the
+server drops extras with the same limit; receivers show it for 4 s and drop it when a message from that
+person arrives.
+
+Found in the UI test: right after sending, the next keystrokes were inside the 2 s throttle window, so
+the other side saw nothing. Sending a message now resets the throttle on both client and server.

@@ -4,6 +4,7 @@ import {
   type ConversationKind,
   type ConversationSummary,
   PREVIEW_LENGTH,
+  type ReceiptStatus,
 } from "@wa/protocol";
 import cassandra from "cassandra-driver";
 import { CassandraService } from "../infra/cassandra.js";
@@ -12,6 +13,7 @@ const { TimeUuid, Long } = cassandra.types;
 const PREPARED = { prepare: true };
 
 export type Member = { username: string; role: "admin" | "member" };
+export type Watermarks = { deliveredUpTo: string | null; readUpTo: string | null };
 export type Conversation = {
   conversationId: string;
   kind: ConversationKind;
@@ -224,6 +226,40 @@ export class ChatRepository {
           PREPARED,
         ),
       ),
+    );
+  }
+
+  // Read implies delivered. USING TIMESTAMP makes an older watermark lose to a newer one.
+  async advance(
+    conversationId: string,
+    username: string,
+    status: ReceiptStatus,
+    upTo: string,
+  ): Promise<void> {
+    const set = status === "read" ? "delivered_up_to = ?, read_up_to = ?" : "delivered_up_to = ?";
+    const values = status === "read" ? [upTo, upTo] : [upTo];
+    await this.db.execute(
+      `UPDATE read_state USING TIMESTAMP ? SET ${set} WHERE conversation_id = ? AND username = ?`,
+      [writeTimeOf(upTo), ...values, conversationId, username],
+      PREPARED,
+    );
+  }
+
+  async watermarks(conversationId: string): Promise<Map<string, Watermarks>> {
+    const result = await this.db.execute(
+      "SELECT username, delivered_up_to, read_up_to FROM read_state WHERE conversation_id = ?",
+      [conversationId],
+      PREPARED,
+    );
+    const asString = (value: unknown) => (value ? String(value) : null);
+    return new Map(
+      result.rows.map((row) => [
+        row.get("username") as string,
+        {
+          deliveredUpTo: asString(row.get("delivered_up_to")),
+          readUpTo: asString(row.get("read_up_to")),
+        },
+      ]),
     );
   }
 

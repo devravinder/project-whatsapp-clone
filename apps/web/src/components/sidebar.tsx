@@ -70,9 +70,13 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-medium">{c.title}</span>
                 <span className="block truncate text-sm text-gray-600">
-                  {c.lastMessage
-                    ? `${c.lastMessage.sender === client.username ? "You" : c.lastMessage.sender}: ${c.lastMessage.preview}`
-                    : "No messages yet"}
+                  {store.typingIn(c.conversationId).length > 0 ? (
+                    <span className="text-[#008069]">typing…</span>
+                  ) : c.lastMessage ? (
+                    `${c.lastMessage.sender === client.username ? "You" : c.lastMessage.sender}: ${c.lastMessage.preview}`
+                  ) : (
+                    "No messages yet"
+                  )}
                 </span>
               </span>
             </button>

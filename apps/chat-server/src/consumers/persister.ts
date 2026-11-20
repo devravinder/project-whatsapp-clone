@@ -39,5 +39,7 @@ export class Persister implements OnApplicationBootstrap {
       message,
       members.map((m) => m.username),
     );
+    // Your own message counts as read by you, so it never shows as unread.
+    await this.repo.advance(message.conversationId, message.sender, "read", message.messageId);
   }
 }

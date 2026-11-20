@@ -1,7 +1,9 @@
+import type { ConversationDetail } from "@wa/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ChatClient } from "../chat-client.js";
 import { lastSeenText, timeOf } from "../format.js";
 import { type LocalMessage, messageKey, useStore } from "../store.js";
+import { tickOf, tickTitle } from "../ticks.js";
 
 export function ChatPane({
   client,
@@ -18,17 +20,28 @@ export function ChatPane({
   const bottom = useRef<HTMLDivElement>(null);
   const newest = timeline.at(-1);
   const title = detail?.title ?? summary?.title ?? conversationId;
+  const typing = store.typingIn(conversationId);
+  const isGroup = summary?.kind === "group";
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [newest && messageKey(newest), newest?.status]);
 
+  const subtitle =
+    typing.length > 0
+      ? isGroup
+        ? `${typing.join(", ")} ${typing.length === 1 ? "is" : "are"} typing…`
+        : "typing…"
+      : isGroup
+        ? (detail?.members.map((m) => m.username).join(", ") ?? "")
+        : lastSeenText(store.presence.get(title));
+
   return (
-    <section className="flex flex-1 flex-col">
+    <section className="flex min-w-0 flex-1 flex-col">
       <header className="bg-[#f0f2f5] px-4 py-3">
         <h2 className="font-semibold">{title}</h2>
-        <p className="text-xs text-gray-600" aria-live="polite">
-          {summary?.kind === "direct" ? lastSeenText(store.presence.get(title)) : ""}
+        <p className="truncate text-xs text-gray-600" aria-live="polite">
+          {subtitle}
         </p>
       </header>
 
@@ -44,12 +57,19 @@ export function ChatPane({
           </div>
         )}
         {timeline.map((m) => (
-          <Bubble key={messageKey(m)} message={m} mine={m.sender === client.username} />
+          <Bubble
+            key={messageKey(m)}
+            message={m}
+            me={client.username}
+            detail={detail}
+            showSender={isGroup}
+          />
         ))}
         <div ref={bottom} />
       </div>
 
       <Composer
+        onTyping={() => client.typing(conversationId)}
         onSend={async (body) => {
           setError(null);
           try {
@@ -64,7 +84,17 @@ export function ChatPane({
   );
 }
 
-function Bubble({ message, mine }: { message: LocalMessage; mine: boolean }) {
+function Bubble({
+  message,
+  me,
+  detail,
+  showSender,
+}: {
+  message: LocalMessage;
+  me: string;
+  detail: ConversationDetail | undefined;
+  showSender: boolean;
+}) {
   if (message.kind === "system") {
     return (
       <p className="my-2 text-center">
@@ -72,23 +102,58 @@ function Bubble({ message, mine }: { message: LocalMessage; mine: boolean }) {
       </p>
     );
   }
+  const mine = message.sender === me;
   return (
     <div className={`my-1 flex ${mine ? "justify-end" : "justify-start"}`}>
       <div
         className={`max-w-[65%] rounded-lg px-3 py-1.5 shadow-sm ${mine ? "bg-[#d9fdd3]" : "bg-white"}`}
       >
-        {!mine && <p className="text-xs font-semibold text-[#008069]">{message.sender}</p>}
+        {!mine && showSender && (
+          <p className="text-xs font-semibold text-[#008069]">{message.sender}</p>
+        )}
         <p className="whitespace-pre-wrap break-words">{message.body}</p>
         <p className="mt-0.5 text-right text-[11px] text-gray-500">
           {timeOf(message.sentAt)}
-          {mine && <Status message={message} />}
+          {mine && <Ticks message={message} detail={detail} me={me} />}
         </p>
       </div>
     </div>
   );
 }
 
-function Composer({ onSend }: { onSend: (body: string) => Promise<void> }) {
+const TICK_GLYPH = { pending: "🕓", failed: "!", sent: "✓", delivered: "✓✓", read: "✓✓" } as const;
+
+function Ticks({
+  message,
+  detail,
+  me,
+}: {
+  message: LocalMessage;
+  detail: ConversationDetail | undefined;
+  me: string;
+}) {
+  const info = tickOf(message, detail, me);
+  const color =
+    info.tick === "read"
+      ? "text-[#53bdeb]"
+      : info.tick === "failed"
+        ? "font-bold text-red-700"
+        : "text-gray-500";
+  // The title doubles as the "message info" for groups: who read, who has it, who is waiting.
+  return (
+    <span className={`ml-1 ${color}`} title={tickTitle(info)} data-tick={info.tick}>
+      {TICK_GLYPH[info.tick]}
+    </span>
+  );
+}
+
+function Composer({
+  onSend,
+  onTyping,
+}: {
+  onSend: (body: string) => Promise<void>;
+  onTyping: () => void;
+}) {
   const [text, setText] = useState("");
   return (
     <form
@@ -110,31 +175,12 @@ function Composer({ onSend }: { onSend: (body: string) => Promise<void> }) {
         className="flex-1 rounded-lg px-3 py-2"
         placeholder="Type a message"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          if (e.target.value) onTyping();
+        }}
       />
       <button className="rounded-lg bg-[#008069] px-4 text-white">Send</button>
     </form>
-  );
-}
-
-function Status({ message }: { message: LocalMessage }) {
-  if (message.status === "pending")
-    return (
-      <span className="ml-1" title="Sending">
-        🕓
-      </span>
-    );
-  if (message.status === "failed") {
-    return (
-      <span className="ml-1 font-bold text-red-700" title="Not sent">
-        !
-      </span>
-    );
-  }
-  // Single tick: the server has it (Kafka acknowledged the write).
-  return (
-    <span className="ml-1" title="Sent">
-      ✓
-    </span>
   );
 }

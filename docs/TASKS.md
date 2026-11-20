@@ -49,8 +49,14 @@
 
 ## 4. Receipts and typing
 
-- [ ] `chat.receipts`: delivered (double tick) and read (blue tick)
-- [ ] Typing indicator over Redis only (not stored)
+- [x] `chat.receipts` + `receipts` consumer group: per-member watermarks in `read_state` (`003_read_state.cql`)
+- [x] Ticks derived from watermarks: ✓ sent, ✓✓ delivered to all, blue ✓✓ read by all; tooltip lists who
+- [x] Client: delivered when a message reaches the device, read while the chat is open and visible
+- [x] Typing indicator over Redis only (not stored), throttled to one frame per 2 s, shown for 4 s
+- [x] Verified: 10 checks (an old receipt never moves a watermark back, read keeps delivered, the sender
+      counts as having read their own message, typing throttle, non-member receipt rejected) and a UI run
+      (blue ticks, typing appears and clears). Fixed on the way: typing right after sending was swallowed
+      by the throttle.
 
 ## 5. Offline sync
 

@@ -1,9 +1,19 @@
-import { type ServerEvent, WS_PATH, type ClientEvent, type SendAck } from "@wa/protocol";
+import {
+  type ClientEvent,
+  isAtOrAfter,
+  type ReceiptStatus,
+  type SendAck,
+  type ServerEvent,
+  TYPING_THROTTLE_MS,
+  WS_PATH,
+} from "@wa/protocol";
 import { type Api, api } from "./api.js";
 import { ChatStore } from "./store.js";
 
 const HISTORY_PAGE = 50;
 const RECONNECT_MS = 2000;
+// Batches receipts for messages arriving in a burst.
+const RECEIPT_DELAY_MS = 200;
 
 type Waiter = { resolve: (ack: SendAck) => void; reject: (error: Error) => void };
 
@@ -16,6 +26,11 @@ export class ChatClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly waiting = new Map<string, Waiter>();
   private watched = "";
+  // Highest watermark already sent, per conversation and status.
+  private readonly reported = new Map<string, string>();
+  private readonly receiptQueue = new Set<string>();
+  private receiptTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly lastTyping = new Map<string, number>();
 
   constructor(readonly username: string) {
     this.api = api(username);
@@ -23,12 +38,14 @@ export class ChatClient {
 
   start(): void {
     this.stopped = false;
+    document.addEventListener("visibilitychange", this.onVisibility);
     void this.refreshConversations();
     this.connect();
   }
 
   stop(): void {
     this.stopped = true;
+    document.removeEventListener("visibilitychange", this.onVisibility);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.socket?.close(1000, "logout");
   }
@@ -45,6 +62,7 @@ export class ChatClient {
       this.socket = null;
       this.store.setConnection("offline");
       this.watched = "";
+      this.reported.clear();
       for (const [, waiter] of this.waiting) waiter.reject(new Error("connection lost"));
       this.waiting.clear();
       if (!this.stopped) this.reconnectTimer = setTimeout(() => this.connect(), RECONNECT_MS);
@@ -65,6 +83,7 @@ export class ChatClient {
         break;
       case "message": {
         this.store.addMessages([event.message]);
+        this.queueReceipts([event.message.conversationId]);
         if (!this.store.conversations.has(event.message.conversationId)) {
           void this.refreshConversations();
         }
@@ -81,6 +100,12 @@ export class ChatClient {
         this.waiting.delete(event.clientMsgId);
         break;
       }
+      case "receipt":
+        this.store.applyReceipt(event);
+        break;
+      case "typing":
+        this.store.setTyping(event.conversationId, event.username);
+        break;
       case "presence":
         this.store.setPresence(event);
         break;
@@ -101,6 +126,7 @@ export class ChatClient {
       after ? { after, limit: 100 } : { limit: HISTORY_PAGE },
     );
     this.store.addMessages(page.messages);
+    this.queueReceipts([active]);
   }
 
   async refreshConversations(): Promise<void> {
@@ -131,6 +157,7 @@ export class ChatClient {
     ]);
     this.store.setDetail(detail);
     this.store.addMessages(page.messages);
+    this.queueReceipts([conversationId]);
     if (!this.store.hasOlder.has(conversationId))
       this.store.hasOlder.set(conversationId, page.hasMore);
   }
@@ -144,6 +171,8 @@ export class ChatClient {
 
   async send(conversationId: string, body: string): Promise<void> {
     const clientMsgId = crypto.randomUUID();
+    // The recipient drops the indicator when the message lands; typing again must show at once.
+    this.lastTyping.delete(conversationId);
     this.store.addPending({
       conversationId,
       clientMsgId,
@@ -176,5 +205,40 @@ export class ChatClient {
       if (error.message !== "offline") throw error;
       return this.api.send(conversationId, clientMsgId, body);
     });
+  }
+
+  typing(conversationId: string): void {
+    const now = Date.now();
+    if (now - (this.lastTyping.get(conversationId) ?? 0) < TYPING_THROTTLE_MS) return;
+    if (this.emit({ type: "typing", conversationId })) this.lastTyping.set(conversationId, now);
+  }
+
+  private onVisibility = () => {
+    if (this.store.activeId) this.queueReceipts([this.store.activeId]);
+  };
+
+  private queueReceipts(conversationIds: string[]): void {
+    for (const id of conversationIds) this.receiptQueue.add(id);
+    this.receiptTimer ??= setTimeout(() => {
+      this.receiptTimer = null;
+      for (const id of this.receiptQueue) this.sendReceipts(id);
+      this.receiptQueue.clear();
+    }, RECEIPT_DELAY_MS);
+  }
+
+  // Delivered as soon as it is on this device; read only while the chat is open and visible.
+  private sendReceipts(conversationId: string): void {
+    const newest = this.store.newestFromOthers(conversationId, this.username);
+    if (!newest) return;
+    this.report(conversationId, "delivered", newest);
+    const reading =
+      this.store.activeId === conversationId && document.visibilityState === "visible";
+    if (reading) this.report(conversationId, "read", newest);
+  }
+
+  private report(conversationId: string, status: ReceiptStatus, upTo: string): void {
+    const key = `${conversationId}|${status}`;
+    if (isAtOrAfter(this.reported.get(key), upTo)) return;
+    if (this.emit({ type: "receipt", conversationId, status, upTo })) this.reported.set(key, upTo);
   }
 }

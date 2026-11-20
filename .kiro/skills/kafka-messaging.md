@@ -10,7 +10,7 @@ description: Kafka topics, keys, consumer groups and delivery guarantees in this
 | Topic           | Key            | Partitions | Retention | Consumers               |
 | --------------- | -------------- | ---------- | --------- | ----------------------- |
 | `chat.messages` | conversationId | 6          | forever   | `persister`, `delivery` |
-| `chat.receipts` | conversationId | 6          | 7 days    | `delivery` (Task 4)     |
+| `chat.receipts` | conversationId | 6          | 7 days    | `receipts`              |
 
 Topics are created by `kafka-setup` in `infra/docker-compose.yaml`; auto-creation is off.
 

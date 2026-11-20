@@ -51,9 +51,10 @@ export class ConversationsService {
 
   async detail(conversationId: string, me: string): Promise<ConversationDetail> {
     await this.requireMember(conversationId, me);
-    const [conversation, members] = await Promise.all([
+    const [conversation, members, watermarks] = await Promise.all([
       this.repo.getConversation(conversationId),
       this.repo.members(conversationId),
+      this.repo.watermarks(conversationId),
     ]);
     const title =
       conversation!.kind === "direct"
@@ -64,7 +65,11 @@ export class ConversationsService {
       kind: conversation!.kind,
       title,
       createdBy: conversation!.createdBy,
-      members: members.map((m) => ({ ...m, deliveredUpTo: null, readUpTo: null })),
+      members: members.map((m) => ({
+        ...m,
+        deliveredUpTo: watermarks.get(m.username)?.deliveredUpTo ?? null,
+        readUpTo: watermarks.get(m.username)?.readUpTo ?? null,
+      })),
     };
   }
 

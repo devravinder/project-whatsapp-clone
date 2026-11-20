@@ -12,10 +12,13 @@ import {
   type ClientEvent,
   clientEventSchema,
   type ServerEvent,
+  TYPING_THROTTLE_MS,
   WS_PATH,
 } from "@wa/protocol";
 import { type WebSocket, WebSocketServer } from "ws";
+import { ChatRepository } from "../chat/chat.repository.js";
 import { MessagesService } from "../chat/messages.service.js";
+import { ReceiptsService } from "../chat/receipts.service.js";
 import { UsersService } from "../chat/users.service.js";
 import { APP_CONFIG, type AppConfig } from "../config.js";
 import { parseJson } from "../infra/kafka.js";
@@ -28,7 +31,12 @@ const HELLO_TIMEOUT_MS = 5_000;
 const MAX_FRAME_BYTES = 64 * 1024;
 
 // queue: one socket's events run in arrival order, so its sends keep their order.
-type Session = { username: string | null; alive: boolean; queue: Promise<void> };
+type Session = {
+  username: string | null;
+  alive: boolean;
+  queue: Promise<void>;
+  lastTyping: Map<string, number>;
+};
 
 const retryable = (status: number) =>
   status === HttpStatus.CONFLICT || status >= HttpStatus.INTERNAL_SERVER_ERROR;
@@ -47,6 +55,8 @@ export class ChatGateway implements OnModuleDestroy {
     @Inject(MessagesService) private readonly messages: MessagesService,
     @Inject(Directory) private readonly directory: Directory,
     @Inject(RedisRouter) private readonly router: RedisRouter,
+    @Inject(ReceiptsService) private readonly receipts: ReceiptsService,
+    @Inject(ChatRepository) private readonly repo: ChatRepository,
   ) {}
 
   // Shares the HTTP port: the upgrade request arrives on the same server.
@@ -59,7 +69,12 @@ export class ChatGateway implements OnModuleDestroy {
   }
 
   private onConnection(socket: WebSocket): void {
-    const session: Session = { username: null, alive: true, queue: Promise.resolve() };
+    const session: Session = {
+      username: null,
+      alive: true,
+      queue: Promise.resolve(),
+      lastTyping: new Map(),
+    };
     this.sessions.set(socket, session);
     const helloTimer = setTimeout(() => {
       if (!session.username) socket.close(CLOSE.helloTimeout, "no hello");
@@ -111,7 +126,17 @@ export class ChatGateway implements OnModuleDestroy {
       }
       return;
     }
+    if (event.type === "receipt") {
+      const { type: _, ...receipt } = event;
+      await this.receipts.submit({ ...receipt, username: session.username });
+      return;
+    }
+    if (event.type === "typing") {
+      await this.typing(session, session.username, event.conversationId);
+      return;
+    }
     if (event.type === "send") {
+      session.lastTyping.delete(event.conversationId);
       try {
         const ack = await this.messages.send({ sender: session.username, ...event });
         send(socket, { type: "ack", ...ack });
@@ -125,6 +150,19 @@ export class ChatGateway implements OnModuleDestroy {
         });
       }
     }
+  }
+
+  // Not stored and not in Kafka: worthless seconds later, so Redis pub/sub only.
+  private async typing(session: Session, username: string, conversationId: string): Promise<void> {
+    const now = Date.now();
+    if (now - (session.lastTyping.get(conversationId) ?? 0) < TYPING_THROTTLE_MS) return;
+    session.lastTyping.set(conversationId, now);
+    const members = await this.repo.members(conversationId);
+    if (!members.some((m) => m.username === username)) return;
+    await this.router.deliver(
+      members.map((m) => m.username).filter((u) => u !== username),
+      { type: "typing", conversationId, username },
+    );
   }
 
   private async onJoin(username: string, socket: WebSocket): Promise<void> {

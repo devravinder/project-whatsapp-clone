@@ -67,3 +67,7 @@ GET http://localhost:4000/health
 GET {{server}}/users/{{other}}/presence
 
 # WebSocket: {"type":"watch","usernames":["bob"]} -> {"type":"presence","username":"bob","online":true,...}
+
+# WebSocket: {"type":"receipt","conversationId":"dm:alice:bob","status":"read","upTo":"<messageId>"}
+#   -> every member gets {"type":"receipt",...}; GET /conversations/:id shows each member's watermarks
+# WebSocket: {"type":"typing","conversationId":"dm:alice:bob"} -> the others get {"type":"typing",...}

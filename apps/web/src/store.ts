@@ -3,8 +3,11 @@ import {
   compareTimeuuid,
   type ConversationDetail,
   type ConversationSummary,
+  isAtOrAfter,
   type Presence,
+  type Receipt,
   type SendAck,
+  TYPING_SHOWN_MS,
 } from "@wa/protocol";
 import { useSyncExternalStore } from "react";
 
@@ -33,6 +36,8 @@ export class ChatStore {
   readonly messages = new Map<string, Map<string, LocalMessage>>();
   readonly hasOlder = new Map<string, boolean>();
   readonly presence = new Map<string, Presence>();
+  // conversationId -> username -> when the indicator stops.
+  readonly typing = new Map<string, Map<string, number>>();
   activeId: string | null = null;
   connection: Connection = "connecting";
   serverId: string | null = null;
@@ -65,6 +70,53 @@ export class ChatStore {
   // The other person in each 1:1 chat: whose presence is shown.
   directPartners(): string[] {
     return [...this.conversations.values()].filter((c) => c.kind === "direct").map((c) => c.title);
+  }
+
+  // Watermarks only move forward: a late or replayed receipt changes nothing.
+  applyReceipt(receipt: Receipt): void {
+    const detail = this.details.get(receipt.conversationId);
+    const member = detail?.members.find((m) => m.username === receipt.username);
+    if (!detail || !member) return;
+    const later = (current: string | null) =>
+      isAtOrAfter(current, receipt.upTo) ? current : receipt.upTo;
+    const updated = {
+      ...member,
+      deliveredUpTo: later(member.deliveredUpTo),
+      readUpTo: receipt.status === "read" ? later(member.readUpTo) : member.readUpTo,
+    };
+    this.details.set(receipt.conversationId, {
+      ...detail,
+      members: detail.members.map((m) => (m.username === receipt.username ? updated : m)),
+    });
+    this.changed();
+  }
+
+  setTyping(conversationId: string, username: string, typing = true): void {
+    let users = this.typing.get(conversationId);
+    if (!users) this.typing.set(conversationId, (users = new Map()));
+    if (typing) {
+      users.set(username, Date.now() + TYPING_SHOWN_MS);
+      setTimeout(() => this.changed(), TYPING_SHOWN_MS + 50);
+    } else if (!users.delete(username)) {
+      return;
+    }
+    this.changed();
+  }
+
+  typingIn(conversationId: string): string[] {
+    const now = Date.now();
+    return [...(this.typing.get(conversationId) ?? [])]
+      .filter(([, until]) => until > now)
+      .map(([u]) => u);
+  }
+
+  // Newest message in the conversation written by someone else.
+  newestFromOthers(conversationId: string, me: string): string | undefined {
+    return (
+      this.timeline(conversationId)
+        .filter((m) => m.messageId && m.sender !== me)
+        .at(-1)?.messageId ?? undefined
+    );
   }
 
   setConnection(connection: Connection, serverId: string | null = null): void {
@@ -118,6 +170,7 @@ export class ChatStore {
       const bucket = this.bucket(m.conversationId);
       const key = messageKey(m);
       if (bucket.get(key)?.status !== "sent") {
+        this.typing.get(m.conversationId)?.delete(m.sender);
         const local: LocalMessage = { ...m, status: "sent" };
         bucket.set(key, local);
         added.push(local);

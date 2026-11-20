@@ -48,8 +48,10 @@ Check from a terminal: `curl http://localhost:4000/health` (repeat it: the `serv
 3. Bob's tab shows it at once over the WebSocket. The sidebar shows which server each tab is on; with
    two servers running, the tabs usually land on different ones and messages still arrive (Redis routes
    them, ADR-010).
-4. Close alice's tab: bob's header changes from `online` to `last seen today at …`.
-5. Stop one server (Ctrl+C): its tabs reconnect through nginx to the other one.
+4. Watch the ticks on alice's message: ✓ (server has it), ✓✓ (bob's device has it), blue ✓✓ (bob has
+   the chat open). Hover them for who has read it. Type in bob's tab: alice sees `typing…`.
+5. Close alice's tab: bob's header changes from `online` to `last seen today at …`.
+6. Stop one server (Ctrl+C): its tabs reconnect through nginx to the other one.
 
 The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
 HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.
