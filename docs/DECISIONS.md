@@ -139,3 +139,45 @@ REST calls carry `x-username`; the WebSocket sends the username as its first mes
 server checks only that the user exists and is a member of the conversation. This is fine on one
 machine and unsafe anywhere else; a real deployment would use OIDC tokens and take the identity from
 the verified `sub` claim.
+
+## ADR-008 - WebSocket protocol
+
+Date: 2026-11-06 - Status: Accepted
+
+Plain `ws` on the HTTP server's port at `/ws`, JSON frames with a `type` field, validated with Zod
+(`@wa/protocol`, shared by server and web).
+
+| Direction       | Frames                                                                      |
+| --------------- | --------------------------------------------------------------------------- |
+| client → server | `hello` (first frame, names the user), `send`                               |
+| server → client | `ready`, `ack` (single tick), `nack` (with `retryable`), `message`, `error` |
+
+- **Order per socket:** frames from one socket are handled one after another, so two quick sends reach
+  Kafka in the order they were typed. Without it, both sends race through the membership check and
+  Redis and can swap.
+- **Close codes** 4000 (frame before hello), 4001 (unknown user), 4002 (no hello within 5 s). 1001 on
+  shutdown tells clients to reconnect.
+- **Heartbeat:** the server pings every 15 s, below the usual 60 s proxy idle timeout; a socket that
+  has not answered the previous ping is terminated. Browsers answer pings automatically.
+- **REST fallback:** `POST /conversations/:id/messages` runs the same `MessagesService.send`, so a client
+  can send while its socket reconnects.
+- **Delivery group starts at `latest`:** a brand-new group would otherwise push the whole history to
+  whoever is online. Once it has committed offsets it resumes where it stopped.
+
+Rejected: Nest's `@WebSocketGateway` - it wraps frames as `{event, data}` and hides the socket
+lifecycle that this project is meant to show. Socket.IO - see ADR-001.
+
+## ADR-009 - Short Kafka consumer session timeouts
+
+Date: 2026-11-06 - Status: Accepted
+
+Found in testing: after a server was killed (no clean shutdown), the restarted server's `persister`
+group took 47 s to get its partitions. The broker kept waiting for the dead member until the session
+timeout (client default 60 s, rebalance timeout 102 s). The new `delivery` group, which had no dead
+member, joined at once - so for 47 s messages were delivered live but not stored.
+
+Consumers now use `sessionTimeout` 10 s, `rebalanceTimeout` 15 s, `heartbeatInterval` 1 s. Measured
+after a kill: both groups consume 3 s after the restarted server is healthy.
+
+Trade-off: a member that pauses more than 10 s (long GC, debugger breakpoint) is dropped and the group
+rebalances. Records are processed one at a time in milliseconds, so this does not happen in practice.

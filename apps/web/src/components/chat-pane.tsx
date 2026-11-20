@@ -79,7 +79,7 @@ function Bubble({ message, mine }: { message: LocalMessage; mine: boolean }) {
         <p className="whitespace-pre-wrap break-words">{message.body}</p>
         <p className="mt-0.5 text-right text-[11px] text-gray-500">
           {timeOf(message.sentAt)}
-          {mine && <span className="ml-1">{message.status === "pending" ? "🕓" : "✓"}</span>}
+          {mine && <Status message={message} />}
         </p>
       </div>
     </div>
@@ -112,5 +112,27 @@ function Composer({ onSend }: { onSend: (body: string) => Promise<void> }) {
       />
       <button className="rounded-lg bg-[#008069] px-4 text-white">Send</button>
     </form>
+  );
+}
+
+function Status({ message }: { message: LocalMessage }) {
+  if (message.status === "pending")
+    return (
+      <span className="ml-1" title="Sending">
+        🕓
+      </span>
+    );
+  if (message.status === "failed") {
+    return (
+      <span className="ml-1 font-bold text-red-700" title="Not sent">
+        !
+      </span>
+    );
+  }
+  // Single tick: the server has it (Kafka acknowledged the write).
+  return (
+    <span className="ml-1" title="Sent">
+      ✓
+    </span>
   );
 }

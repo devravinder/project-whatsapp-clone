@@ -10,8 +10,10 @@ import { useSyncExternalStore } from "react";
 export type LocalMessage = Omit<ChatMessage, "messageId"> & {
   // Null until the server acknowledged it (the clock icon).
   messageId: string | null;
-  status: "pending" | "sent";
+  status: "pending" | "sent" | "failed";
 };
+
+export type Connection = "connecting" | "online" | "offline";
 
 // Sender + clientMsgId is unique and known before the server assigns messageId.
 export const messageKey = (m: { sender: string; clientMsgId: string }) =>
@@ -30,6 +32,8 @@ export class ChatStore {
   readonly messages = new Map<string, Map<string, LocalMessage>>();
   readonly hasOlder = new Map<string, boolean>();
   activeId: string | null = null;
+  connection: Connection = "connecting";
+  serverId: string | null = null;
 
   private version = 0;
   private readonly listeners = new Set<() => void>();
@@ -48,6 +52,21 @@ export class ChatStore {
 
   setActive(id: string | null): void {
     this.activeId = id;
+    this.changed();
+  }
+
+  setConnection(connection: Connection, serverId: string | null = null): void {
+    this.connection = connection;
+    this.serverId = serverId;
+    this.changed();
+  }
+
+  fail(sender: string, conversationId: string, clientMsgId: string): void {
+    const bucket = this.bucket(conversationId);
+    const key = messageKey({ sender, clientMsgId });
+    const message = bucket.get(key);
+    if (message?.status !== "pending") return;
+    bucket.set(key, { ...message, status: "failed" });
     this.changed();
   }
 

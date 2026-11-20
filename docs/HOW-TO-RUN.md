@@ -40,7 +40,7 @@ Check from a terminal: `curl http://localhost:4001/health` (503 lists what is do
 1. Open <http://localhost:5180> in two tabs. The username lives in the tab (`sessionStorage`), so each
    tab can be a different user: `alice` in one, `bob` in the other.
 2. In alice's tab, start a chat with `bob` and send a message.
-3. Bob's tab shows it within 3 s (Task 1 polls; Task 2 replaces that with a WebSocket).
+3. Bob's tab shows it at once over the WebSocket; the sidebar shows which server the tab is connected to.
 
 The REST API can be driven without the UI: `http/chat-server.http` (VS Code REST Client or IntelliJ
 HTTP client). Every call except `POST /users` needs the `x-username` header; there is no login.

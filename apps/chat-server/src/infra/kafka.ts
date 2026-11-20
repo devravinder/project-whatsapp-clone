@@ -92,6 +92,10 @@ export class KafkaService implements OnModuleDestroy {
         clientId: `${this.config.SERVER_ID}-${options.groupId}`,
         bootstrapBrokers: this.config.KAFKA_BROKERS,
         deserializers: stringDeserializers,
+        // Defaults (60 s / 102 s) stall a group that long after a server is killed.
+        sessionTimeout: 10_000,
+        rebalanceTimeout: 15_000,
+        heartbeatInterval: 1_000,
       });
       try {
         const stream = await consumer.consume({

@@ -29,9 +29,13 @@
 
 ## 2. Realtime on one server
 
-- [ ] WebSocket gateway, username sent as the first message
-- [ ] Delivery consumer group pushes new messages to connected members
-- [ ] Single tick on the Kafka ack
+- [x] WebSocket gateway on `/ws` (same port as HTTP), username sent as the first frame
+- [x] Delivery consumer group pushes new messages to connected members (and the sender's other tabs)
+- [x] Single tick on the Kafka ack; REST fallback when the socket is down
+- [x] Heartbeat ping every 15 s; a socket that misses one is terminated
+- [x] Verified: 14 WebSocket checks (live delivery in about 20 ms, a 30-message burst in order, retry
+      not delivered twice, close codes 4000/4001/4002), REST and WebSocket through the Vite proxy, and
+      a two-browser UI run (headless Chrome)
 
 ## 3. Two servers
 

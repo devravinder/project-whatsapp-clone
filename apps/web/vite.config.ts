@@ -20,6 +20,7 @@ export default defineConfig(({ command, mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ""),
         },
+        "/ws": { target: apiTarget, ws: true, changeOrigin: true },
       },
     },
   };

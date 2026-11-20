@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ChatClient } from "../chat-client.js";
-import { useStore } from "../store.js";
+import { type Connection, useStore } from "../store.js";
 
 export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: () => void }) {
   const store = useStore(client.store);
@@ -22,7 +22,10 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
   return (
     <aside className="flex w-80 flex-col border-r bg-white">
       <header className="flex items-center justify-between bg-[#f0f2f5] px-4 py-3">
-        <span className="font-semibold">{client.username}</span>
+        <span>
+          <span className="block font-semibold">{client.username}</span>
+          <ConnectionBadge connection={store.connection} serverId={store.serverId} />
+        </span>
         <button className="text-sm text-gray-600 hover:underline" onClick={onLogout}>
           Switch user
         </button>
@@ -71,5 +74,26 @@ export function Sidebar({ client, onLogout }: { client: ChatClient; onLogout: ()
         ))}
       </ul>
     </aside>
+  );
+}
+
+function ConnectionBadge({
+  connection,
+  serverId,
+}: {
+  connection: Connection;
+  serverId: string | null;
+}) {
+  const label =
+    connection === "online"
+      ? `online via ${serverId}`
+      : connection === "connecting"
+        ? "connecting…"
+        : "offline";
+  const color = connection === "online" ? "text-green-700" : "text-amber-700";
+  return (
+    <span className={`block text-xs ${color}`} role="status">
+      {label}
+    </span>
   );
 }

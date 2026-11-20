@@ -54,3 +54,8 @@ x-username: {{me}}
 ### Catch up: after = the newest messageId you have
 GET {{server}}/conversations/{{conversation}}/messages?after=<messageId>
 x-username: {{me}}
+
+### WebSocket (not an HTTP request): ws://localhost:4001/ws
+# 1. send {"type":"hello","username":"alice"}            -> {"type":"ready",...}
+# 2. send {"type":"send","conversationId":"dm:alice:bob","clientMsgId":"<uuid>","body":"hi"}
+#                                                          -> {"type":"ack",...} then {"type":"message",...}

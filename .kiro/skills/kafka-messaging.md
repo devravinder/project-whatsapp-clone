@@ -21,6 +21,10 @@ Topics are created by `kafka-setup` in `infra/docker-compose.yaml`; auto-creatio
 - **At-least-once:** commit offsets after the work is done. Every consumer is idempotent - Cassandra
   upserts by primary key, the client drops a `messageId` it already has.
 - **Each group reads everything.** A new group can start from the earliest offset to rebuild state.
+- **Short session timeouts** (10 s) on every consumer: with the 60 s default, a killed server's dead
+  member blocks its group's partitions for up to a minute after restart (ADR-009).
+- **Retry a failing handler, do not skip it** (the log is the truth); only a record that cannot be
+  parsed is logged and skipped.
 - Client: `@platformatic/kafka` (`Producer`, `Consumer`, `Admin`), string serializers, JSON values.
 - Brokers from the host: `localhost:9095`; from containers: `kafka:9092`.
 
